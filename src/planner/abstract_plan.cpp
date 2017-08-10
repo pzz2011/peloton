@@ -12,13 +12,8 @@
 
 #include "planner/abstract_plan.h"
 
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
-
 #include "common/logger.h"
-#include "common/types.h"
+#include "common/macros.h"
 #include "expression/expression_util.h"
 
 namespace peloton {
@@ -37,7 +32,12 @@ const std::vector<std::unique_ptr<AbstractPlan>> &AbstractPlan::GetChildren()
   return children_;
 }
 
-const AbstractPlan *AbstractPlan::GetParent() { return parent_; }
+const AbstractPlan *AbstractPlan::GetChild(uint32_t child_index) const {
+  PL_ASSERT(child_index < children_.size());
+  return children_[child_index].get();
+}
+
+const AbstractPlan *AbstractPlan::GetParent() const { return parent_; }
 
 // Get a string representation of this plan
 std::ostream &operator<<(std::ostream &os, const AbstractPlan &plan) {
@@ -48,21 +48,12 @@ std::ostream &operator<<(std::ostream &os, const AbstractPlan &plan) {
 
 const std::string AbstractPlan::GetInfo() const {
   std::ostringstream os;
-
-  os << GetInfo();
-
-  // Traverse the tree
-  std::string child_spacer = "  ";
-  for (int ctr = 0, cnt = static_cast<int>(children_.size()); ctr < cnt;
-       ctr++) {
-    os << child_spacer << children_[ctr].get()->GetPlanNodeType() << "\n";
-    os << children_[ctr].get()->GetInfo();
-  }
-
+  os << PlanNodeTypeToString(GetPlanNodeType())
+     << " [NumChildren=" << children_.size() << "]";
   return os.str();
 }
 
-void AbstractPlan::SetParameterValues(std::vector<common::Value *> *values) {
+void AbstractPlan::SetParameterValues(std::vector<type::Value> *values) {
   LOG_TRACE("Setting parameter values in all child plans of %s",
             GetInfo().c_str());
   for (auto &child_plan : GetChildren()) {

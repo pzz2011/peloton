@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include <cstdint>
@@ -19,9 +18,10 @@
 #include <vector>
 
 #include "abstract_plan.h"
-#include "common/types.h"
 #include "expression/abstract_expression.h"
+#include "planner/attribute_info.h"
 #include "planner/project_info.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
@@ -32,13 +32,8 @@ namespace planner {
 
 class AbstractJoinPlan : public AbstractPlan {
  public:
-  AbstractJoinPlan(const AbstractJoinPlan &) = delete;
-  AbstractJoinPlan &operator=(const AbstractJoinPlan &) = delete;
-  AbstractJoinPlan(AbstractJoinPlan &&) = delete;
-  AbstractJoinPlan &operator=(AbstractJoinPlan &&) = delete;
-
   AbstractJoinPlan(
-      PelotonJoinType joinType,
+      JoinType joinType,
       std::unique_ptr<const expression::AbstractExpression> &&predicate,
       std::unique_ptr<const ProjectInfo> &&proj_info,
       std::shared_ptr<const catalog::Schema> &proj_schema)
@@ -50,25 +45,40 @@ class AbstractJoinPlan : public AbstractPlan {
     // Fuck off!
   }
 
+  void PerformBinding(BindingContext &context) override;
+
   //===--------------------------------------------------------------------===//
   // Accessors
   //===--------------------------------------------------------------------===//
 
-  PelotonJoinType GetJoinType() const { return join_type_; }
+  JoinType GetJoinType() const { return join_type_; }
 
   const expression::AbstractExpression *GetPredicate() const {
     return predicate_.get();
+  }
+
+  const std::vector<const AttributeInfo *> &GetLeftAttributes() const {
+    return left_attributes_;
+  }
+
+  const std::vector<const AttributeInfo *> &GetRightAttributes() const {
+    return right_attributes_;
   }
 
   const ProjectInfo *GetProjInfo() const { return proj_info_.get(); }
 
   const catalog::Schema *GetSchema() const { return proj_schema_.get(); }
 
-  std::unique_ptr<AbstractPlan> Copy() const = 0;
+ protected:
+  // For joins, attributes arrive from both the left and right side of the join
+  // This method enables this merging by properly identifying each side's
+  // attributes in separate contexts.
+  virtual void HandleSubplanBinding(bool from_left,
+                                    const BindingContext &input) = 0;
 
  private:
   /** @brief The type of join that we're going to perform */
-  PelotonJoinType join_type_;
+  JoinType join_type_;
 
   /** @brief Join predicate. */
   const std::unique_ptr<const expression::AbstractExpression> predicate_;
@@ -78,6 +88,12 @@ class AbstractJoinPlan : public AbstractPlan {
 
   /** @brief Projection schema */
   std::shared_ptr<const catalog::Schema> proj_schema_;
+
+  std::vector<const AttributeInfo *> left_attributes_;
+  std::vector<const AttributeInfo *> right_attributes_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(AbstractJoinPlan);
 };
 
 }  // namespace planner

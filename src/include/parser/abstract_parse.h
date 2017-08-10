@@ -10,19 +10,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <iostream>
 #include <memory>
 #include <cstdint>
 #include <vector>
-#include <map>
 #include <vector>
 
 #include "common/printable.h"
-#include "common/types.h"
-#include "common/serializer.h"
+#include "type/types.h"
+#include "type/serializer.h"
 
 namespace peloton {
 namespace parser {

@@ -13,11 +13,12 @@
 #pragma once
 
 #include <memory>
+#include <numeric>
 #include <string>
 #include <vector>
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "expression/abstract_expression.h"
 
 namespace peloton {
@@ -30,11 +31,6 @@ namespace planner {
 
 class AbstractScan : public AbstractPlan {
  public:
-  AbstractScan(const AbstractScan &) = delete;
-  AbstractScan &operator=(const AbstractScan &) = delete;
-  AbstractScan(AbstractScan &&) = delete;
-  AbstractScan &operator=(AbstractScan &&) = delete;
-
   AbstractScan(storage::DataTable *table,
                expression::AbstractExpression *predicate,
                const std::vector<oid_t> &column_ids)
@@ -49,32 +45,42 @@ class AbstractScan : public AbstractPlan {
 
   inline const std::vector<oid_t> &GetColumnIds() const { return column_ids_; }
 
-  inline PlanNodeType GetPlanNodeType() const {
-    return PLAN_NODE_TYPE_ABSTRACT_SCAN;
+  inline PlanNodeType GetPlanNodeType() const override {
+    return PlanNodeType::ABSTRACT_SCAN;
   }
 
-  inline const std::string GetInfo() const { return "AbstractScan"; }
+  void GetOutputColumns(std::vector<oid_t> &columns) const override {
+    columns.resize(GetColumnIds().size());
+    std::iota(columns.begin(), columns.end(), 0);
+  }
+
+  inline const std::string GetInfo() const override { return "AbstractScan"; }
 
   inline storage::DataTable *GetTable() const { return target_table_; }
 
-  inline bool IsForUpdate() const { return is_for_update;}
-  
+  void GetAttributes(std::vector<const AttributeInfo *> &ais) const {
+    for (const auto &ai : attributes_) {
+      ais.push_back(&ai);
+    }
+  }
+
+  inline bool IsForUpdate() const {
+    return is_for_update;
+  }
+
+  // Attribute binding
+  void PerformBinding(BindingContext &binding_context) override;
 
  protected:
-  // These methods only used by its derived classes (when deserialization)
-  expression::AbstractExpression *Predicate() { return predicate_.get(); }
-  std::vector<oid_t> &ColumnIds() { return column_ids_; }
   void SetTargetTable(storage::DataTable *table) { target_table_ = table; }
-  void SetColumnId(oid_t col_id) { column_ids_.push_back(col_id); }
+
+  void AddColumnId(oid_t col_id) { column_ids_.push_back(col_id); }
+
   void SetPredicate(expression::AbstractExpression *predicate) {
     predicate_ = std::unique_ptr<expression::AbstractExpression>(predicate);
   }
-  void SetForUpdateFlag(bool flag){is_for_update = flag;}
 
-  /** @brief Predicate with ValueParameters inside. Needed to be binded at
-   * the binding stage to generate the "real" predicate.
-   */
-  std::unique_ptr<expression::AbstractExpression> predicate_with_params_;
+  void SetForUpdateFlag(bool flag) { is_for_update = flag; }
 
  private:
   /** @brief Pointer to table to scan from. */
@@ -87,8 +93,13 @@ class AbstractScan : public AbstractPlan {
   /** @brief Columns from tile group to be added to logical tile output. */
   std::vector<oid_t> column_ids_;
 
+  std::vector<AttributeInfo> attributes_;
+
   // "For Update" Flag
   bool is_for_update = false;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(AbstractScan);
 };
 
 }  // namespace planner

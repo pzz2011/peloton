@@ -18,7 +18,7 @@
 
 #include "catalog/manager.h"
 #include "common/platform.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "index/index.h"
 
 #include "index/bwtree.h"
@@ -34,26 +34,6 @@
 namespace peloton {
 namespace index {
   
-class ItemPointerComparator {
- public:
-  bool operator()(ItemPointer * const &p1, ItemPointer * const &p2) const {
-    return (p1->block == p2->block) && (p1->offset == p2->offset);
-  }
-  
-  ItemPointerComparator(const ItemPointerComparator&) {}
-  ItemPointerComparator() {}
-};
-
-class ItemPointerHashFunc {
- public:
-  size_t operator()(ItemPointer * const &p) const {
-    return std::hash<oid_t>()(p->block) ^ std::hash<oid_t>()(p->offset);
-  }
-  
-  ItemPointerHashFunc(const ItemPointerHashFunc&) {}
-  ItemPointerHashFunc() {}
-};
-
 /**
  * BW tree-based index implementation.
  *
@@ -95,12 +75,21 @@ class BWTreeIndex : public Index {
                        ItemPointer *value,
                        std::function<bool(const void *)> predicate);
 
-  void Scan(const std::vector<common::Value *> &values,
+  void Scan(const std::vector<type::Value> &values,
             const std::vector<oid_t> &key_column_ids,
             const std::vector<ExpressionType> &expr_types,
-            const ScanDirectionType &scan_direction,
+            ScanDirectionType scan_direction,
             std::vector<ValueType> &result,
             const ConjunctionScanPredicate *csp_p);
+            
+  void ScanLimit(const std::vector<type::Value> &values,
+                 const std::vector<oid_t> &key_column_ids,
+                 const std::vector<ExpressionType> &expr_types,
+                 ScanDirectionType scan_direction,
+                 std::vector<ValueType> &result,
+                 const ConjunctionScanPredicate *csp_p,
+                 uint64_t limit,
+                 uint64_t offset);
 
   void ScanAllKeys(std::vector<ValueType> &result);
 
@@ -108,9 +97,6 @@ class BWTreeIndex : public Index {
                std::vector<ValueType> &result);
 
   std::string GetTypeName() const;
-
-  // TODO: Implement this
-  bool Cleanup() { return true; }
 
   // TODO: Implement this
   size_t GetMemoryFootprint() { return 0; }
@@ -135,5 +121,5 @@ class BWTreeIndex : public Index {
   MapType container;
 };
 
-}  // End index namespace
-}  // End peloton namespace
+}  // namespace index
+}  // namespace peloton

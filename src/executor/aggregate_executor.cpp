@@ -6,20 +6,17 @@
 //
 // Identification: src/executor/aggregate_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-#include <concurrency/transaction_manager_factory.h>
-#include <utility>
-#include <vector>
-
+#include "common/container_tuple.h"
 #include "common/logger.h"
+#include "concurrency/transaction_manager_factory.h"
 #include "executor/aggregate_executor.h"
 #include "executor/aggregator.h"
 #include "executor/executor_context.h"
 #include "executor/logical_tile_factory.h"
-#include "expression/container_tuple.h"
 #include "planner/aggregate_plan.h"
 #include "storage/table_factory.h"
 
@@ -67,11 +64,8 @@ bool AggregateExecutor::DInit() {
   // clean up temporary aggregation table
   delete output_table;
 
-  bool own_schema = false;
-  bool adapt_table = false;
-  output_table = storage::TableFactory::GetDataTable(
-      INVALID_OID, INVALID_OID, output_table_schema, "aggregate_temp_table",
-      DEFAULT_TUPLES_PER_TILEGROUP, own_schema, adapt_table);
+  output_table =
+      storage::TableFactory::GetTempTable(output_table_schema, false);
 
   return true;
 }
@@ -106,17 +100,17 @@ bool AggregateExecutor::DExecute() {
     if (nullptr == aggregator.get()) {
       // Initialize the aggregator
       switch (node.GetAggregateStrategy()) {
-        case AGGREGATE_TYPE_HASH:
+        case AggregateType::HASH:
           LOG_TRACE("Use HashAggregator");
           aggregator.reset(new HashAggregator(
               &node, output_table, executor_context_, tile->GetColumnCount()));
           break;
-        case AGGREGATE_TYPE_SORTED:
+        case AggregateType::SORTED:
           LOG_TRACE("Use SortedAggregator");
           aggregator.reset(new SortedAggregator(
               &node, output_table, executor_context_, tile->GetColumnCount()));
           break;
-        case AGGREGATE_TYPE_PLAIN:
+        case AggregateType::PLAIN:
           LOG_TRACE("Use PlainAggregator");
           aggregator.reset(
               new PlainAggregator(&node, output_table, executor_context_));
@@ -130,8 +124,8 @@ bool AggregateExecutor::DExecute() {
     LOG_TRACE("Looping over tile..");
 
     for (oid_t tuple_id : *tile) {
-      std::unique_ptr<expression::ContainerTuple<LogicalTile>> cur_tuple(
-          new expression::ContainerTuple<LogicalTile>(tile.get(), tuple_id));
+      std::unique_ptr<ContainerTuple<LogicalTile>> cur_tuple(
+          new ContainerTuple<LogicalTile>(tile.get(), tuple_id));
 
       if (aggregator->Advance(cur_tuple.get()) == false) {
         return false;
@@ -149,14 +143,13 @@ bool AggregateExecutor::DExecute() {
     bool all_count_aggs = true;
     for (oid_t aggno = 0; aggno < node.GetUniqueAggTerms().size(); aggno++) {
       auto agg_type = node.GetUniqueAggTerms()[aggno].aggtype;
-      if (agg_type != EXPRESSION_TYPE_AGGREGATE_COUNT &&
-          agg_type != EXPRESSION_TYPE_AGGREGATE_COUNT_STAR)
+      if (agg_type != ExpressionType::AGGREGATE_COUNT &&
+          agg_type != ExpressionType::AGGREGATE_COUNT_STAR)
         all_count_aggs = false;
     }
 
     // If there's no tuples in the table and only if no group-by in the
-    // query,
-    // we should return a NULL tuple
+    // query, we should return a NULL tuple
     // this is required by SQL
     if (!aggregator.get() && node.GetGroupbyColIds().empty()) {
       LOG_TRACE(
@@ -169,14 +162,8 @@ bool AggregateExecutor::DExecute() {
       } else {
         tuple->SetAllNulls();
       }
-      auto location = output_table->InsertTuple(tuple.get());
+      UNUSED_ATTRIBUTE auto location = output_table->InsertTuple(tuple.get());
       PL_ASSERT(location.block != INVALID_OID);
-
-      auto &manager = catalog::Manager::GetInstance();
-      auto tile_group_header =
-          manager.GetTileGroup(location.block)->GetHeader();
-      tile_group_header->SetTransactionId(location.offset, INITIAL_TXN_ID);
-
     } else {
       done = true;
       return false;
@@ -184,22 +171,24 @@ bool AggregateExecutor::DExecute() {
   }
 
   // Transform output table into result
+  LOG_TRACE("%s", output_table->GetInfo().c_str());
   auto tile_group_count = output_table->GetTileGroupCount();
-
   if (tile_group_count == 0) return false;
 
   for (oid_t tile_group_itr = 0; tile_group_itr < tile_group_count;
        tile_group_itr++) {
     auto tile_group = output_table->GetTileGroup(tile_group_itr);
+    PL_ASSERT(tile_group != nullptr);
+    LOG_TRACE("\n%s", tile_group->GetInfo().c_str());
 
     // Get the logical tiles corresponding to the given tile group
     auto logical_tile = LogicalTileFactory::WrapTileGroup(tile_group);
 
     result.push_back(logical_tile);
   }
+  LOG_TRACE("%s", result[result_itr]->GetInfo().c_str());
 
   done = true;
-  LOG_TRACE("Result tiles : %lu ", result.size());
 
   SetOutput(result[result_itr]);
   result_itr++;

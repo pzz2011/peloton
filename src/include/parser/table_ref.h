@@ -16,15 +16,15 @@
 #include <vector>
 
 #include "expression/abstract_expression.h"
-#include "expression/parser_expression.h"
-
-#include "common/types.h"
+#include "parser/sql_statement.h"
+#include "common/sql_node_visitor.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace parser {
 
-struct SelectStatement;
-struct JoinDefinition;
+class SelectStatement;
+class JoinDefinition;
 
 //  Holds reference to tables.
 // Can be either table names or a select statement.
@@ -32,7 +32,7 @@ struct TableRef {
   TableRef(TableReferenceType type)
       : type(type),
         schema(NULL),
-        table_name(NULL),
+        table_info_(NULL),
         alias(NULL),
         select(NULL),
         list(NULL),
@@ -45,7 +45,7 @@ struct TableRef {
   char* schema;
 
   // Expression of database name and table name
-  expression::ParserExpression* table_name;
+  TableInfo* table_info_ = nullptr;
 
   char* alias;
 
@@ -57,26 +57,31 @@ struct TableRef {
   inline bool HasSchema() { return schema != NULL; }
 
   // Get the name of the database of this table
-  inline const char* GetDatabaseName() {
-    if (table_name == nullptr || table_name->database == nullptr) {
+  inline const char* GetDatabaseName() const {
+    if (table_info_ == nullptr || table_info_->database_name == nullptr) {
       return DEFAULT_DB_NAME;
     }
-    return table_name->database;
+    return table_info_->database_name;
   }
 
   // Get the name of the table
-  inline const char* GetTableName() {
+  inline const char* GetTableAlias() const {
     if (alias != NULL)
       return alias;
     else
-      return table_name->name;
+      return table_info_->table_name;
   }
+
+  inline const char* GetTableName() const { return table_info_->table_name; }
+
+  void Accept(SqlNodeVisitor* v) const { v->Visit(this); }
 };
 
 // Definition of a join table
-struct JoinDefinition {
+class JoinDefinition {
+ public:
   JoinDefinition()
-      : left(NULL), right(NULL), condition(NULL), type(JOIN_TYPE_INNER) {}
+      : left(NULL), right(NULL), condition(NULL), type(JoinType::INNER) {}
 
   virtual ~JoinDefinition() {
     delete left;
@@ -88,8 +93,10 @@ struct JoinDefinition {
   TableRef* right;
   expression::AbstractExpression* condition;
 
-  PelotonJoinType type;
+  JoinType type;
+
+  void Accept(SqlNodeVisitor* v) const { v->Visit(this); }
 };
 
-}  // End parser namespace
-}  // End peloton namespace
+}  // namespace parser
+}  // namespace peloton

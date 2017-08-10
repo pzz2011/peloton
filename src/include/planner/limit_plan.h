@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
@@ -29,11 +29,6 @@ namespace planner {
  */
 class LimitPlan : public AbstractPlan {
  public:
-  LimitPlan(const LimitPlan &) = delete;
-  LimitPlan &operator=(const LimitPlan &) = delete;
-  LimitPlan(LimitPlan &&) = delete;
-  LimitPlan &operator=(LimitPlan &&) = delete;
-
   LimitPlan(size_t limit, size_t offset) : limit_(limit), offset_(offset) {}
 
   // Accessors
@@ -41,7 +36,7 @@ class LimitPlan : public AbstractPlan {
 
   size_t GetOffset() const { return offset_; }
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_LIMIT; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::LIMIT; }
 
   const std::string GetInfo() const { return "Limit"; }
 
@@ -52,7 +47,10 @@ class LimitPlan : public AbstractPlan {
  private:
   const size_t limit_;   // as LIMIT in SQL standard
   const size_t offset_;  // as OFFSET in SQL standard
+
+ private:
+  DISALLOW_COPY_AND_MOVE(LimitPlan);
 };
 
-} /* namespace planner */
-} /* namespace peloton */
+}  // namespace planner
+}  // namespace peloton

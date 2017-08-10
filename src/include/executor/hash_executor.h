@@ -6,20 +6,18 @@
 //
 // Identification: src/include/executor/hash_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
 #include <unordered_map>
-#include <unordered_set>
 
-#include "common/types.h"
+#include "type/types.h"
 #include "executor/abstract_executor.h"
 #include "executor/logical_tile.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 #include <boost/functional/hash.hpp>
 
@@ -42,11 +40,11 @@ class HashExecutor : public AbstractExecutor {
 
   /** @brief Type definitions for hash table */
   typedef std::unordered_map<
-      expression::ContainerTuple<LogicalTile>,
+      ContainerTuple<LogicalTile>,
       std::unordered_set<std::pair<size_t, oid_t>,
                          boost::hash<std::pair<size_t, oid_t>>>,
-      expression::ContainerTupleHasher<LogicalTile>,
-      expression::ContainerTupleComparator<LogicalTile>> HashMapType;
+      ContainerTupleHasher<LogicalTile>,
+      ContainerTupleComparator<LogicalTile>> HashMapType;
 
   inline HashMapType &GetHashTable() { return this->hash_table_; }
 
@@ -73,5 +71,5 @@ class HashExecutor : public AbstractExecutor {
   size_t result_itr = 0;
 };
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

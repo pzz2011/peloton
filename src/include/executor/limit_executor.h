@@ -6,10 +6,9 @@
 //
 // Identification: src/include/executor/limit_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
@@ -50,5 +49,5 @@ class LimitExecutor : public AbstractExecutor {
   size_t num_returned_ = 0;
 };
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

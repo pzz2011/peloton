@@ -6,16 +6,12 @@
 //
 // Identification: src/executor/hash_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
-#include <utility>
-#include <vector>
-
 #include "common/logger.h"
-#include "common/value.h"
+#include "type/value.h"
 #include "executor/logical_tile.h"
 #include "executor/hash_executor.h"
 #include "planner/hash_plan.h"
@@ -71,7 +67,7 @@ bool HashExecutor::DExecute() {
 
     // Construct a logical tile
     for (auto &hashkey : hashkeys) {
-      PL_ASSERT(hashkey->GetExpressionType() == EXPRESSION_TYPE_VALUE_TUPLE);
+      PL_ASSERT(hashkey->GetExpressionType() == ExpressionType::VALUE_TUPLE);
       auto tuple_value =
           reinterpret_cast<const expression::TupleValueExpression *>(
               hashkey.get());
@@ -88,8 +84,14 @@ bool HashExecutor::DExecute() {
       for (oid_t tuple_id : *tile) {
         // Key : container tuple with a subset of tuple attributes
         // Value : < child_tile offset, tuple offset >
-        hash_table_[HashMapType::key_type(tile, tuple_id, &column_ids_)].insert(
-            std::make_pair(child_tile_itr, tuple_id));
+        auto key = HashMapType::key_type(tile, tuple_id, &column_ids_);
+        if (hash_table_.find(key) != hash_table_.end()){
+           //If data is already present, remove from output
+           //but leave data for hash joins.
+           tile->RemoveVisibility(tuple_id);
+        }
+        hash_table_[key].insert(
+                    std::make_pair(child_tile_itr, tuple_id));
       }
     }
 
@@ -112,5 +114,5 @@ bool HashExecutor::DExecute() {
   return false;
 }
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

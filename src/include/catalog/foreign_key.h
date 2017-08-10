@@ -15,9 +15,8 @@
 
 #include <string>
 #include <vector>
-#include <iostream>
 
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace catalog {
@@ -77,5 +76,5 @@ class ForeignKey {
   std::string fk_name;
 };
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

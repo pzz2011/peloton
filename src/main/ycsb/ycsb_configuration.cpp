@@ -27,7 +27,7 @@ void Usage(FILE *out) {
   fprintf(out,
           "Command line options : ycsb <options> \n"
           "   -h --help              :  print help message \n"
-          "   -i --index             :  index type: bwtree (default) or btree\n"
+          "   -i --index             :  index type: bwtree (default) \n"
           "   -k --scale_factor      :  # of K tuples \n"
           "   -d --duration          :  execution duration \n"
           "   -p --profile_duration  :  profile duration \n"
@@ -40,6 +40,8 @@ void Usage(FILE *out) {
           "   -m --string_mode       :  store strings \n"
           "   -g --gc_mode           :  enable garbage collection \n"
           "   -n --gc_backend_count  :  # of gc backends \n"
+          "   -l --loader_count      :  # of loaders \n"
+          "   -y --epoch             :  epoch type: centralized or decentralized \n"
   );
 }
 
@@ -57,11 +59,13 @@ static struct option opts[] = {
     { "string_mode", no_argument, NULL, 'm' },
     { "gc_mode", no_argument, NULL, 'g' },
     { "gc_backend_count", optional_argument, NULL, 'n' },
+    { "loader_count", optional_argument, NULL, 'n' },
+    { "epoch", optional_argument, NULL, 'y' },
     { NULL, 0, NULL, 0 }
 };
 
 void ValidateIndex(const configuration &state) {
-  if (state.index != INDEX_TYPE_BTREE && state.index != INDEX_TYPE_BWTREE) {
+  if (state.index != IndexType::BWTREE && state.index != IndexType::BWTREE) {
     LOG_ERROR("Invalid index");
     exit(EXIT_FAILURE);
   }
@@ -150,7 +154,8 @@ void ValidateGCBackendCount(const configuration &state) {
 
 void ParseArguments(int argc, char *argv[], configuration &state) {
   // Default Values
-  state.index = INDEX_TYPE_BWTREE;
+  state.index = IndexType::BWTREE;
+  state.epoch = EpochType::DECENTRALIZED_EPOCH;
   state.scale_factor = 1;
   state.duration = 10;
   state.profile_duration = 1;
@@ -163,27 +168,39 @@ void ParseArguments(int argc, char *argv[], configuration &state) {
   state.string_mode = false;
   state.gc_mode = false;
   state.gc_backend_count = 1;
+  state.loader_count = 1;
 
   // Parse args
   while (1) {
     int idx = 0;
-    int c = getopt_long(argc, argv, "hemgi:k:d:p:b:c:o:u:z:n:", opts, &idx);
+    int c = getopt_long(argc, argv, "hemgi:k:d:p:b:c:o:u:z:n:l:y:", opts, &idx);
 
     if (c == -1) break;
 
     switch (c) {
       case 'i': {
         char *index = optarg;
-        if (strcmp(index, "btree") == 0) {
-          state.index = INDEX_TYPE_BTREE;
-        } else if (strcmp(index, "bwtree") == 0) {
-          state.index = INDEX_TYPE_BWTREE;
+        if (strcmp(index, "bwtree") == 0) {
+          state.index = IndexType::BWTREE;
         } else {
           LOG_ERROR("Unknown index: %s", index);
           exit(EXIT_FAILURE);
         }
         break;
       }
+      case 'y': {
+        char *epoch = optarg;
+        if (strcmp(epoch, "decentralized") == 0) {
+          state.epoch = EpochType::DECENTRALIZED_EPOCH;
+        } else {
+          LOG_ERROR("Unknown epoch: %s", epoch);
+          exit(EXIT_FAILURE);
+        }
+        break;
+      }
+      case 'l':
+        state.loader_count = atoi(optarg);
+        break;
       case 'k':
         state.scale_factor = atoi(optarg);
         break;
@@ -218,7 +235,7 @@ void ParseArguments(int argc, char *argv[], configuration &state) {
         state.gc_mode = true;
         break;
       case 'n':
-        state.gc_backend_count = atof(optarg);
+        state.gc_backend_count = atoi(optarg);
         break;
         
       case 'h':
@@ -246,7 +263,7 @@ void ParseArguments(int argc, char *argv[], configuration &state) {
   ValidateZipfTheta(state);
   ValidateGCBackendCount(state);
 
-  LOG_TRACE("%s : %d", "Run exponential backoff", state.run_backoff);
+  LOG_TRACE("%s : %d", "Run exponential backoff", state.exp_backoff);
   LOG_TRACE("%s : %d", "Run string mode", state.string_mode);
   LOG_TRACE("%s : %d", "Run garbage collection", state.gc_mode);
   

@@ -16,12 +16,12 @@
 #include <vector>
 #include <atomic>
 
+#include "executor/testing_executor_util.h"
 #include "executor/drop_executor.h"
 #include "common/harness.h"
 
 #include "catalog/schema.h"
-#include "common/value_factory.h"
-#include "common/varlen_pool.h"
+#include "type/value_factory.h"
 #include "catalog/catalog.h"
 
 #include "executor/executor_context.h"
@@ -39,7 +39,6 @@
 #include "storage/table_factory.h"
 #include "concurrency/transaction_manager_factory.h"
 
-#include "executor/executor_tests_util.h"
 #include "executor/mock_executor.h"
 
 #include "planner/drop_plan.h"
@@ -63,7 +62,7 @@ class MutateTests : public PelotonTest {};
 std::atomic<int> tuple_id;
 std::atomic<int> delete_tuple_id;
 
-void InsertTuple(storage::DataTable *table, common::VarlenPool *pool,
+void InsertTuple(storage::DataTable *table, type::AbstractPool *pool,
                  UNUSED_ATTRIBUTE uint64_t thread_itr) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
@@ -71,7 +70,7 @@ void InsertTuple(storage::DataTable *table, common::VarlenPool *pool,
       new executor::ExecutorContext(txn));
 
   for (oid_t tuple_itr = 0; tuple_itr < 10; tuple_itr++) {
-    auto tuple = ExecutorTestsUtil::GetTuple(table, ++tuple_id, pool);
+    auto tuple = TestingExecutorUtil::GetTuple(table, ++tuple_id, pool);
 
     planner::InsertPlan node(table, std::move(tuple));
     executor::InsertExecutor executor(&node, context.get());
@@ -89,14 +88,18 @@ void UpdateTuple(storage::DataTable *table,
 
   // Update
   //std::vector<oid_t> update_column_ids = {2};
-  //std::vector<common::Value *> values;
-  auto update_val = common::ValueFactory::GetDoubleValue(23.5);
+  //std::vector<type::Value *> values;
+  auto update_val = type::ValueFactory::GetDecimalValue(23.5);
 
   TargetList target_list;
   DirectMapList direct_map_list;
-  target_list.emplace_back(
-      2, expression::ExpressionUtil::ConstantValueFactory(update_val));
-  LOG_INFO("%u", target_list.at(0).first);
+
+  planner::DerivedAttribute attribute{
+      expression::ExpressionUtil::ConstantValueFactory(update_val)};
+  target_list.emplace_back(2, attribute);
+
+  LOG_TRACE("%u", target_list.at(0).first);
+
   direct_map_list.emplace_back(0, std::pair<oid_t, oid_t>(0, 0));
   direct_map_list.emplace_back(1, std::pair<oid_t, oid_t>(0, 1));
   direct_map_list.emplace_back(3, std::pair<oid_t, oid_t>(0, 3));
@@ -112,12 +115,12 @@ void UpdateTuple(storage::DataTable *table,
 
   // WHERE ATTR_0 < 70
   expression::TupleValueExpression *tup_val_exp =
-      new expression::TupleValueExpression(common::Type::INTEGER, 0, 0);
+      new expression::TupleValueExpression(type::TypeId::INTEGER, 0, 0);
   expression::ConstantValueExpression *const_val_exp =
       new expression::ConstantValueExpression(
-          common::ValueFactory::GetIntegerValue(70));
+          type::ValueFactory::GetIntegerValue(70));
   auto predicate = new expression::ComparisonExpression(
-      EXPRESSION_TYPE_COMPARE_LESSTHAN, tup_val_exp, const_val_exp);
+      ExpressionType::COMPARE_LESSTHAN, tup_val_exp, const_val_exp);
 
   // Seq scan
   std::vector<oid_t> column_ids = {0};
@@ -147,19 +150,19 @@ void DeleteTuple(storage::DataTable *table,
   std::vector<storage::Tuple *> tuples;
 
   // Delete
-  planner::DeletePlan delete_node(table, false);
+  planner::DeletePlan delete_node(table);
   executor::DeleteExecutor delete_executor(&delete_node, context.get());
 
   // Predicate
 
   // WHERE ATTR_0 > 60
   expression::TupleValueExpression *tup_val_exp =
-      new expression::TupleValueExpression(common::Type::INTEGER, 0, 0);
+      new expression::TupleValueExpression(type::TypeId::INTEGER, 0, 0);
   expression::ConstantValueExpression *const_val_exp =
       new expression::ConstantValueExpression(
-          common::ValueFactory::GetIntegerValue(60));
+          type::ValueFactory::GetIntegerValue(60));
   auto predicate = new expression::ComparisonExpression(
-      EXPRESSION_TYPE_COMPARE_GREATERTHAN, tup_val_exp, const_val_exp);
+      ExpressionType::COMPARE_GREATERTHAN, tup_val_exp, const_val_exp);
 
   // Seq scan
   std::vector<oid_t> column_ids = {};
@@ -189,7 +192,7 @@ TEST_F(MutateTests, StressTests) {
   auto testing_pool = TestingHarness::GetInstance().GetTestingPool();
 
   // Create insert node for this test.
-  storage::DataTable *table = ExecutorTestsUtil::CreateTable();
+  storage::DataTable *table = TestingExecutorUtil::CreateTable();
 
   // Pass through insert executor.
   /*
@@ -206,15 +209,14 @@ TEST_F(MutateTests, StressTests) {
   */
 
   auto non_empty_tuple =
-      ExecutorTestsUtil::GetTuple(table, ++tuple_id, testing_pool);
+      TestingExecutorUtil::GetTuple(table, ++tuple_id, testing_pool);
   planner::InsertPlan node2(table, std::move(non_empty_tuple));
   executor::InsertExecutor executor2(&node2, context.get());
   executor2.Execute();
 
   try {
     executor2.Execute();
-  }
-  catch (ConstraintException &ce) {
+  } catch (ConstraintException &ce) {
     LOG_ERROR("%s", ce.what());
   }
 
@@ -223,12 +225,12 @@ TEST_F(MutateTests, StressTests) {
   LaunchParallelTest(1, InsertTuple, table, testing_pool);
   LOG_TRACE("%s", table->GetInfo().c_str());
 
-  LOG_INFO("---------------------------------------------");
+  LOG_TRACE("---------------------------------------------");
 
   // LaunchParallelTest(1, UpdateTuple, table);
   // LOG_TRACE(table->GetInfo().c_str());
 
-  LOG_INFO("---------------------------------------------");
+  LOG_TRACE("---------------------------------------------");
 
   LaunchParallelTest(1, DeleteTuple, table);
 
@@ -237,13 +239,13 @@ TEST_F(MutateTests, StressTests) {
   // PRIMARY KEY
   std::vector<catalog::Column> columns;
 
-  columns.push_back(ExecutorTestsUtil::GetColumnInfo(0));
+  columns.push_back(TestingExecutorUtil::GetColumnInfo(0));
   catalog::Schema *key_schema = new catalog::Schema(columns);
   storage::Tuple *key1 = new storage::Tuple(key_schema, true);
   storage::Tuple *key2 = new storage::Tuple(key_schema, true);
 
-  key1->SetValue(0, common::ValueFactory::GetIntegerValue(10), nullptr);
-  key2->SetValue(0, common::ValueFactory::GetIntegerValue(100), nullptr);
+  key1->SetValue(0, type::ValueFactory::GetIntegerValue(10), nullptr);
+  key2->SetValue(0, type::ValueFactory::GetIntegerValue(100), nullptr);
 
   delete key1;
   delete key2;
@@ -251,17 +253,17 @@ TEST_F(MutateTests, StressTests) {
 
   // SEC KEY
   columns.clear();
-  columns.push_back(ExecutorTestsUtil::GetColumnInfo(0));
-  columns.push_back(ExecutorTestsUtil::GetColumnInfo(1));
+  columns.push_back(TestingExecutorUtil::GetColumnInfo(0));
+  columns.push_back(TestingExecutorUtil::GetColumnInfo(1));
   key_schema = new catalog::Schema(columns);
 
   storage::Tuple *key3 = new storage::Tuple(key_schema, true);
   storage::Tuple *key4 = new storage::Tuple(key_schema, true);
 
-  key3->SetValue(0, common::ValueFactory::GetIntegerValue(10), nullptr);
-  key3->SetValue(1, common::ValueFactory::GetIntegerValue(11), nullptr);
-  key4->SetValue(0, common::ValueFactory::GetIntegerValue(100), nullptr);
-  key4->SetValue(1, common::ValueFactory::GetIntegerValue(101), nullptr);
+  key3->SetValue(0, type::ValueFactory::GetIntegerValue(10), nullptr);
+  key3->SetValue(1, type::ValueFactory::GetIntegerValue(11), nullptr);
+  key4->SetValue(0, type::ValueFactory::GetIntegerValue(100), nullptr);
+  key4->SetValue(1, type::ValueFactory::GetIntegerValue(101), nullptr);
 
   delete key3;
   delete key4;
@@ -276,9 +278,9 @@ TEST_F(MutateTests, InsertTest) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   // We are going to insert a tile group into a table in this test
   std::unique_ptr<storage::DataTable> source_data_table(
-      ExecutorTestsUtil::CreateAndPopulateTable());
+      TestingExecutorUtil::CreateAndPopulateTable());
   std::unique_ptr<storage::DataTable> dest_data_table(
-      ExecutorTestsUtil::CreateTable());
+      TestingExecutorUtil::CreateTable());
   const std::vector<storage::Tuple *> tuples;
 
   EXPECT_EQ(source_data_table->GetTileGroupCount(), 4);
@@ -298,8 +300,9 @@ TEST_F(MutateTests, InsertTest) {
   EXPECT_CALL(child_executor, DInit()).WillOnce(Return(true));
 
   // Will return one tile.
-  EXPECT_CALL(child_executor, DExecute()).WillOnce(Return(true)).WillOnce(
-      Return(false));
+  EXPECT_CALL(child_executor, DExecute())
+      .WillOnce(Return(true))
+      .WillOnce(Return(false));
 
   // Construct input logical tile
   auto physical_tile_group = source_data_table->GetTileGroup(0);
@@ -329,7 +332,7 @@ TEST_F(MutateTests, InsertTest) {
 TEST_F(MutateTests, DeleteTest) {
   // We are going to insert a tile group into a table in this test
 
-  storage::DataTable *table = ExecutorTestsUtil::CreateTable();
+  storage::DataTable *table = TestingExecutorUtil::CreateTable();
   auto testing_pool = TestingHarness::GetInstance().GetTestingPool();
 
   LaunchParallelTest(1, InsertTuple, table, testing_pool);
@@ -384,7 +387,7 @@ static int SeqScanCount(storage::DataTable *table,
 
 TEST_F(MutateTests, UpdateTest) {
   // We are going to insert a tile group into a table in this test
-  storage::DataTable *table = ExecutorTestsUtil::CreateTable();
+  storage::DataTable *table = TestingExecutorUtil::CreateTable();
   auto testing_pool = TestingHarness::GetInstance().GetTestingPool();
 
   LaunchParallelTest(1, InsertTuple, table, testing_pool);
@@ -397,13 +400,13 @@ TEST_F(MutateTests, UpdateTest) {
 
   // ATTR = 23.5
   expression::TupleValueExpression *tup_val_exp =
-      new expression::TupleValueExpression(common::Type::DECIMAL, 0, 2);
+      new expression::TupleValueExpression(type::TypeId::DECIMAL, 0, 2);
   expression::ConstantValueExpression *const_val_exp =
       new expression::ConstantValueExpression(
-          common::ValueFactory::GetDoubleValue(23.5));
+          type::ValueFactory::GetDecimalValue(23.5));
 
   auto predicate = new expression::ComparisonExpression(
-      EXPRESSION_TYPE_COMPARE_EQUAL, tup_val_exp, const_val_exp);
+      ExpressionType::COMPARE_EQUAL, tup_val_exp, const_val_exp);
 
   tuple_cnt = SeqScanCount(table, column_ids, predicate);
   EXPECT_EQ(tuple_cnt, 6);

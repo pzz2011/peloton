@@ -33,9 +33,9 @@
 #include "catalog/manager.h"
 #include "catalog/schema.h"
 
-#include "common/types.h"
-#include "common/value.h"
-#include "common/value_factory.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "type/value_factory.h"
 #include "common/logger.h"
 #include "common/timer.h"
 #include "common/generator.h"
@@ -57,7 +57,7 @@
 #include "expression/tuple_value_expression.h"
 #include "expression/comparison_expression.h"
 #include "expression/expression_util.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 #include "index/index_factory.h"
 
@@ -77,11 +77,11 @@ namespace benchmark {
 namespace ycsb {
 
   
-bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
+bool RunMixed(const size_t thread_id, ZipfDistribution &zipf, FastRandom &rng) {
 
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
 
-  concurrency::Transaction *txn = txn_manager.BeginTransaction();
+  concurrency::Transaction *txn = txn_manager.BeginTransaction(thread_id);
 
   std::unique_ptr<executor::ExecutorContext> context(
       new executor::ExecutorContext(txn));
@@ -100,7 +100,7 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
   std::vector<ExpressionType> expr_types;
 
   key_column_ids.push_back(0);
-  expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+  expr_types.push_back(ExpressionType::COMPARE_EQUAL);
 
   std::vector<expression::AbstractExpression *> runtime_keys;
   
@@ -114,11 +114,11 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
       /////////////////////////////////////////////////////////
 
       // set up parameter values
-      std::vector<common::Value *> values;
+      std::vector<type::Value > values;
 
       auto lookup_key = zipf.GetNextNumber();
 
-      values.push_back(common::ValueFactory::GetIntegerValue(lookup_key).Copy());
+      values.push_back(type::ValueFactory::GetIntegerValue(lookup_key).Copy());
 
       auto ycsb_pkey_index = user_table->GetIndexWithOid(user_table_pkey_index_oid);
     
@@ -141,10 +141,24 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
       // update multiple attributes
       for (oid_t col_itr = 0; col_itr < column_count; col_itr++) {
         if (col_itr == 1) {
-        int update_raw_value = 1;
-        common::Value * update_val = common::ValueFactory::GetIntegerValue(update_raw_value).Copy();
-          target_list.emplace_back(
-                col_itr, expression::ExpressionUtil::ConstantValueFactory(*update_val));
+          if (state.string_mode == true) {
+
+            std::string update_raw_value(100, 'a');
+            type::Value update_val = type::ValueFactory::GetVarcharValue(update_raw_value).Copy();
+
+            planner::DerivedAttribute attr{
+                expression::ExpressionUtil::ConstantValueFactory(update_val)};
+            target_list.emplace_back(col_itr, attr);
+
+          } else {
+
+            int update_raw_value = 1;
+            type::Value update_val = type::ValueFactory::GetIntegerValue(update_raw_value).Copy();
+
+            planner::DerivedAttribute attr{
+                expression::ExpressionUtil::ConstantValueFactory(update_val)};
+            target_list.emplace_back(col_itr, attr);
+          }
         }
         else {
           direct_map_list.emplace_back(col_itr,
@@ -163,7 +177,7 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
 
       ExecuteUpdate(&update_executor);
 
-      if (txn->GetResult() != Result::RESULT_SUCCESS) {
+      if (txn->GetResult() != ResultType::SUCCESS) {
         txn_manager.AbortTransaction(txn);
         return false;
       }
@@ -174,11 +188,11 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
       /////////////////////////////////////////////////////////
 
       // set up parameter values
-      std::vector<common::Value *> values;
+      std::vector<type::Value > values;
 
       auto lookup_key = zipf.GetNextNumber();
 
-      values.push_back(common::ValueFactory::GetIntegerValue(lookup_key).Copy());
+      values.push_back(type::ValueFactory::GetIntegerValue(lookup_key).Copy());
 
       auto ycsb_pkey_index = user_table->GetIndexWithOid(user_table_pkey_index_oid);
     
@@ -199,7 +213,7 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
       
       ExecuteRead(&index_scan_executor);
 
-      if (txn->GetResult() != Result::RESULT_SUCCESS) {
+      if (txn->GetResult() != ResultType::SUCCESS) {
         txn_manager.AbortTransaction(txn);
         return false;
       }
@@ -207,17 +221,17 @@ bool RunMixed(ZipfDistribution &zipf, FastRandom &rng) {
   }
 
   // transaction passed execution.
-  PL_ASSERT(txn->GetResult() == Result::RESULT_SUCCESS);
+  PL_ASSERT(txn->GetResult() == ResultType::SUCCESS);
 
   auto result = txn_manager.CommitTransaction(txn);
 
-  if (result == Result::RESULT_SUCCESS) {
+  if (result == ResultType::SUCCESS) {
     return true;
     
   } else {
     // transaction failed commitment.
-    PL_ASSERT(result == Result::RESULT_ABORTED ||
-           result == Result::RESULT_FAILURE);
+    PL_ASSERT(result == ResultType::ABORTED ||
+           result == ResultType::FAILURE);
     return false;
   }
 }

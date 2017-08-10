@@ -10,17 +10,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include "optimizer/operator_node.h"
 #include "optimizer/group.h"
 #include "optimizer/pattern.h"
-#include "optimizer/op_expression.h"
-
 #include <map>
 #include <tuple>
 #include <memory>
+#include "operator_expression.h"
 
 namespace peloton {
 namespace optimizer {
@@ -39,11 +37,11 @@ class BindingIterator {
 
   virtual bool HasNext() = 0;
 
-  virtual std::shared_ptr<OpExpression> Next() = 0;
+  virtual std::shared_ptr<OperatorExpression> Next() = 0;
 
  protected:
-  Optimizer &optimizer;
-  Memo &memo;
+  Optimizer &optimizer_;
+  Memo &memo_;
 };
 
 class GroupBindingIterator : public BindingIterator {
@@ -53,16 +51,16 @@ class GroupBindingIterator : public BindingIterator {
 
   bool HasNext() override;
 
-  std::shared_ptr<OpExpression> Next() override;
+  std::shared_ptr<OperatorExpression> Next() override;
 
  private:
-  GroupID group_id;
-  std::shared_ptr<Pattern> pattern;
-  Group *target_group;
-  size_t num_group_items;
+  GroupID group_id_;
+  std::shared_ptr<Pattern> pattern_;
+  Group *target_group_;
+  size_t num_group_items_;
 
-  size_t current_item_index;
-  std::unique_ptr<BindingIterator> current_iterator;
+  size_t current_item_index_;
+  std::unique_ptr<BindingIterator> current_iterator_;
 };
 
 class ItemBindingIterator : public BindingIterator {
@@ -73,18 +71,19 @@ class ItemBindingIterator : public BindingIterator {
 
   bool HasNext() override;
 
-  std::shared_ptr<OpExpression> Next() override;
+  std::shared_ptr<OperatorExpression> Next() override;
 
  private:
-  std::shared_ptr<GroupExpression> gexpr;
-  std::shared_ptr<Pattern> pattern;
+  std::shared_ptr<GroupExpression> gexpr_;
+  std::shared_ptr<Pattern> pattern_;
 
-  bool first;
-  bool has_next;
-  std::shared_ptr<OpExpression> current_binding;
-  std::vector<std::vector<std::shared_ptr<OpExpression>>> children_bindings;
-  std::vector<size_t> children_bindings_pos;
+  bool first_;
+  bool has_next_;
+  std::shared_ptr<OperatorExpression> current_binding_;
+  std::vector<std::vector<std::shared_ptr<OperatorExpression>>>
+      children_bindings_;
+  std::vector<size_t> children_bindings_pos_;
 };
 
-} /* namespace optimizer */
-} /* namespace peloton */
+} // namespace optimizer
+} // namespace peloton

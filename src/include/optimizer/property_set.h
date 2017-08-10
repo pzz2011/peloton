@@ -10,38 +10,48 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include "optimizer/property.h"
-#include "optimizer/util.h"
-
-#include <vector>
 #include <memory>
+#include <vector>
+
+#include "optimizer/property.h"
 
 namespace peloton {
 namespace optimizer {
 
+// A set of physical properties
 class PropertySet {
  public:
   PropertySet();
 
+  PropertySet(std::vector<std::shared_ptr<Property>> properties);
+
   const std::vector<std::shared_ptr<Property>> &Properties() const;
+
+  void AddProperty(std::shared_ptr<Property> property);
+
+  void RemoveProperty(PropertyType type);
 
   const std::shared_ptr<Property> GetPropertyOfType(PropertyType type) const;
 
-  bool IsSubset(const PropertySet &r);
-
   hash_t Hash() const;
+
+  // whether this property set contains a specific property
+  bool HasProperty(const Property &r_property) const;
+
+  bool operator>=(const PropertySet &r) const;
 
   bool operator==(const PropertySet &r) const;
 
+  std::string ToString() const;
+
  private:
-  std::vector<std::shared_ptr<Property>> properties;
+  std::vector<std::shared_ptr<Property>> properties_;
 };
 
-} /* namespace optimizer */
-} /* namespace peloton */
+} // namespace optimizer 
+} // namespace peloton 
 
 namespace std {
 
@@ -51,4 +61,5 @@ struct hash<peloton::optimizer::PropertySet> {
   typedef std::size_t result_type;
   result_type operator()(argument_type const &s) const { return s.Hash(); }
 };
-}
+
+}  // namespace std

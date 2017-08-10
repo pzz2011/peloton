@@ -13,6 +13,7 @@
 #pragma once
 
 #include "planner/abstract_plan.h"
+#include "concurrency/transaction.h"
 
 namespace peloton {
 namespace storage {
@@ -26,21 +27,20 @@ class Schema;
 }
 
 namespace planner {
+
 class DropPlan : public AbstractPlan {
  public:
   DropPlan() = delete;
-  DropPlan(const DropPlan &) = delete;
-  DropPlan &operator=(const DropPlan &) = delete;
-  DropPlan(DropPlan &&) = delete;
-  DropPlan &operator=(DropPlan &&) = delete;
 
   explicit DropPlan(storage::DataTable *table);
 
-  explicit DropPlan(std::string name);
+  explicit DropPlan(std::string name,
+                    concurrency::Transaction *txn);
 
-  explicit DropPlan(parser::DropStatement *parse_tree);
+  explicit DropPlan(parser::DropStatement *parse_tree,
+                    concurrency::Transaction *txn);
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_DROP; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::DROP; }
 
   const std::string GetInfo() const {
     std::string returned_string = "DropPlan:\n";
@@ -61,6 +61,10 @@ class DropPlan : public AbstractPlan {
   storage::DataTable *target_table_ = nullptr;
   std::string table_name;
   bool missing;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(DropPlan);
 };
-}
-}
+
+}  // namespace planner
+}  // namespace peloton

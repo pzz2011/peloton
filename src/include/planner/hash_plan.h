@@ -13,7 +13,7 @@
 #pragma once
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "expression/abstract_expression.h"
 
 namespace peloton {
@@ -25,26 +25,23 @@ namespace planner {
  */
 class HashPlan : public AbstractPlan {
  public:
-  HashPlan(const HashPlan &) = delete;
-  HashPlan &operator=(const HashPlan &) = delete;
-  HashPlan(const HashPlan &&) = delete;
-  HashPlan &operator=(const HashPlan &&) = delete;
-
   typedef const expression::AbstractExpression HashKeyType;
   typedef std::unique_ptr<HashKeyType> HashKeyPtrType;
 
   HashPlan(std::vector<HashKeyPtrType> &hashkeys)
       : hash_keys_(std::move(hashkeys)) {}
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_HASH; }
+  void PerformBinding(BindingContext &binding_context) override;
 
-  const std::string GetInfo() const { return "Hash"; }
+  inline PlanNodeType GetPlanNodeType() const override { return PlanNodeType::HASH; }
+
+  const std::string GetInfo() const override { return "Hash"; }
 
   inline const std::vector<HashKeyPtrType> &GetHashKeys() const {
     return this->hash_keys_;
   }
 
-  std::unique_ptr<AbstractPlan> Copy() const {
+  std::unique_ptr<AbstractPlan> Copy() const override {
     std::vector<HashKeyPtrType> copied_hash_keys;
     for (const auto &key : hash_keys_) {
       copied_hash_keys.push_back(std::unique_ptr<HashKeyType>(key->Copy()));
@@ -54,6 +51,10 @@ class HashPlan : public AbstractPlan {
 
  private:
   std::vector<HashKeyPtrType> hash_keys_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(HashPlan);
 };
-}
-}
+
+}  // namespace planner
+}  // namespace peloton

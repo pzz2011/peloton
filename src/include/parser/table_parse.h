@@ -15,7 +15,7 @@
 
 #include "parser/abstract_parse.h"
 
-#include "common/types.h"
+#include "type/types.h"
 #include "common/logger.h"
 
 namespace peloton {
@@ -31,7 +31,7 @@ class TableParse : public AbstractParse {
 
   /*
   explicit TableParse(RangeVar *table_node) {
-    entity_type_ = ENTITY_TYPE_TABLE;
+    entity_type_ = EntityType::TABLE;
 
     entity_name_ = std::string(table_node->relname);
 
@@ -39,13 +39,13 @@ class TableParse : public AbstractParse {
   }
   */
 
-  inline ParseNodeType GetParseNodeType() const { return PARSE_NODE_TYPE_DROP; }
+  inline ParseNodeType GetParseNodeType() const { return ParseNodeType::DROP; }
 
   const std::string GetInfo() const { return "DropParse"; }
 
  private:
   // Type of entity
-  EntityType entity_type_ = ENTITY_TYPE_INVALID;
+  EntityType entity_type_ = EntityTypeId::INVALID;
 
   // Name of entity
   std::string entity_name_;

@@ -15,7 +15,7 @@
 #include "container/lock_free_array.h"
 #include "common/logger.h"
 #include "common/macros.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 
@@ -153,4 +153,4 @@ template class LockFreeArray<std::shared_ptr<storage::IndirectionArray>>;
 
 template class LockFreeArray<oid_t>;
 
-}  // End peloton namespace
+}  // namespace peloton

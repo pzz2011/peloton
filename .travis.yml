@@ -1,44 +1,95 @@
-sudo: required
-dist: trusty
-
+#language: c++
 matrix:
     include:
-        - compiler: gcc
+        # Mac build
+        - os: osx
+          osx_image: xcode8.3
+          compiler: clang
+          env:
+            - PELOTON_BUILD_TYPE=Debug COVERALLS=Off
+
+        # Linux builds
+        - os: linux
+          sudo: required
+          dist: trusty
+          compiler: gcc
           addons:
               apt:
-                sources:
-                    - ubuntu-toolchain-r-test
-                    - boost-latest
-                packages:
+                  sources:
+                      - llvm-toolchain-precise-3.7
+                      - ubuntu-toolchain-r-test
+                      - boost-latest
+                  packages:
                     - g++-4.9
-          env: CXX=g++-4.9
-        - compiler: gcc
+          env: 
+            - CXX=g++-4.9 PELOTON_BUILD_TYPE=Debug COVERALLS=Off
+
+        - os: linux
+          sudo: required
+          dist: trusty
+          compiler: gcc
           addons:
               apt:
-                sources:
-                    - ubuntu-toolchain-r-test
-                    - boost-latest
-                packages:
+                  sources:
+                      - llvm-toolchain-precise-3.7
+                      - ubuntu-toolchain-r-test
+                      - boost-latest
+                  packages:
+                    - g++-4.9
+          env: 
+            - CXX=g++-4.9 PELOTON_BUILD_TYPE=Release COVERALLS=Off
+        
+        #Job where coveralls is executed
+        - os: linux
+          sudo: required
+          dist: trusty
+          compiler: gcc
+          addons:
+              apt:
+                  sources:
+                      - llvm-toolchain-precise-3.7
+                      - ubuntu-toolchain-r-test
+                      - boost-latest
+                  packages:
                     - g++-5
-          env: CXX=g++-5
+          env: 
+            - CXX=g++-5 PELOTON_BUILD_TYPE=Debug COVERALLS=On
+
+        - os: linux
+          sudo: required
+          dist: trusty
+          compiler: gcc
+          addons:
+              apt:
+                  sources:
+                      - llvm-toolchain-precise-3.7
+                      - ubuntu-toolchain-r-test
+                      - boost-latest
+                  packages:
+                    - g++-5
+          env: 
+            - CXX=g++-5 PELOTON_BUILD_TYPE=Release COVERALLS=Off
 
 before_script:
     # setup environment
-    - sudo -H sh ./script/installation/packages.sh
-    - pip install --user cpp-coveralls
+    - ./script/installation/packages.sh
+    - if [[ $TRAVIS_OS_NAME == 'linux' ]]; then pip install --user cpp-coveralls; fi
 
 script:
-    # first, run validator
-    - python ./script/validators/validator.py
+    # first, run source_validator
+    - python ./script/validators/source_validator.py
     # create build directory
     - mkdir build
     - cd build
     # run cmake
-    - cmake -DCOVERALLS=ON -DCMAKE_BUILD_TYPE=Debug ..
+    - cmake -DCOVERALLS=$COVERALLS -DCMAKE_PREFIX_PATH=`llvm-config-3.7 --prefix` -DCMAKE_BUILD_TYPE=$PELOTON_BUILD_TYPE -DUSE_SANITIZER=Address ..
     # build
-    - make -j2
+    - make -j4
     # run tests
-    - make check -j2
+    - if [[ $TRAVIS_OS_NAME != 'osx' ]]; then make check -j4; fi
+    - if [[ $TRAVIS_OS_NAME == 'osx' ]]; then ASAN_OPTIONS=detect_container_overflow=0 make check -j4; fi
+    # build benchmarks
+    - make benchmark -j4
     # install peloton
     - make install
     # run psql tests
@@ -46,5 +97,5 @@ script:
     # run jdbc tests
     - python ../script/validators/jdbc_validator.py
     # upload coverage info
-    - make coveralls
+    - bash -c "if [ $(echo $COVERALLS | tr "[:lower:]" "[:upper:]") = 'ON' ] ; then make coveralls; fi"
 

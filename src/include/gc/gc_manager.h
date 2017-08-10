@@ -10,16 +10,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include <memory>
+#include <vector>
+#include <thread>
 
-#include "common/macros.h"
-#include "common/types.h"
+#include "common/item_pointer.h"
 #include "common/logger.h"
+#include "common/macros.h"
+#include "type/types.h"
 
 namespace peloton {
+
+namespace storage {
+class TileGroup;
+}
+
 namespace gc {
 
 //===--------------------------------------------------------------------===//
@@ -33,17 +40,21 @@ class GCManager {
   GCManager(GCManager &&) = delete;
   GCManager &operator=(GCManager &&) = delete;
 
-  GCManager() : is_running_(true) { }
+  GCManager() : is_running_(false) {}
 
-  virtual ~GCManager() { }
+  virtual ~GCManager() {}
 
-  static GCManager& GetInstance() {
+  static GCManager &GetInstance() {
     static GCManager gc_manager;
     return gc_manager;
   }
 
+  virtual void Reset() { is_running_ = false; }
+
   // Get status of whether GC thread is running or not
-  virtual bool GetStatus() { return this->is_running_; }
+  bool GetStatus() { return this->is_running_; }
+
+  virtual void StartGC(std::vector<std::unique_ptr<std::thread>> & UNUSED_ATTRIBUTE) {}
 
   virtual void StartGC() {}
 
@@ -53,14 +64,21 @@ class GCManager {
     return INVALID_ITEMPOINTER;
   }
 
-  virtual void RegisterTable(const oid_t &table_id UNUSED_ATTRIBUTE) { }
+  virtual void RegisterTable(const oid_t &table_id UNUSED_ATTRIBUTE) {}
 
-  virtual void RecycleTransaction(std::shared_ptr<ReadWriteSet> gc_set UNUSED_ATTRIBUTE, 
-                                   const cid_t &timestamp UNUSED_ATTRIBUTE,
-                                   const GCSetType gc_set_type UNUSED_ATTRIBUTE) {}
+  virtual void DeregisterTable(const oid_t &table_id UNUSED_ATTRIBUTE) {}
 
- private:
-  bool is_running_;
+  virtual size_t GetTableCount() { return 0; }
+
+  virtual void RecycleTransaction(std::shared_ptr<GCSet> gc_set UNUSED_ATTRIBUTE, 
+                                  const eid_t &epoch_id UNUSED_ATTRIBUTE, 
+                                  const size_t &thread_id UNUSED_ATTRIBUTE) {}
+
+ protected:
+  void CheckAndReclaimVarlenColumns(storage::TileGroup *tg, oid_t tuple_id);
+
+ protected:
+  volatile bool is_running_;
 };
 
 }  // namespace gc

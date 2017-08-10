@@ -11,10 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "planner/project_info.h"
+
 #include "executor/executor_context.h"
+#include "expression/abstract_expression.h"
 #include "expression/expression_util.h"
-#include "expression/parameter_value_expression.h"
-#include "expression/constant_value_expression.h"
 
 namespace peloton {
 namespace planner {
@@ -24,7 +24,7 @@ namespace planner {
  */
 ProjectInfo::~ProjectInfo() {
   for (auto target : target_list_) {
-    delete target.second;
+    delete target.second.expr;
   }
 }
 
@@ -45,21 +45,20 @@ ProjectInfo::~ProjectInfo() {
  * @param tuple2  Source tuple 2.
  * @param econtext  ExecutorContext for expression evaluation.
  */
-bool ProjectInfo::Evaluate(storage::Tuple *dest, 
-                           const AbstractTuple *tuple1,
+bool ProjectInfo::Evaluate(storage::Tuple *dest, const AbstractTuple *tuple1,
                            const AbstractTuple *tuple2,
                            executor::ExecutorContext *econtext) const {
   // Get varlen pool
-  common::VarlenPool *pool = nullptr;
-  if (econtext != nullptr) pool = econtext->GetExecutorContextPool();
+  type::AbstractPool *pool = nullptr;
+  if (econtext != nullptr) pool = econtext->GetPool();
 
   // (A) Execute target list
   for (auto target : target_list_) {
     auto col_id = target.first;
-    auto expr = target.second;
+    auto expr = target.second.expr;
     auto value = expr->Evaluate(tuple1, tuple2, econtext);
 
-    dest->SetValue(col_id, *value, pool);
+    dest->SetValue(col_id, value, pool);
   }
 
   // (B) Execute direct map
@@ -70,29 +69,26 @@ bool ProjectInfo::Evaluate(storage::Tuple *dest,
     auto src_col_id = dm.second.second;
 
     if (tuple_index == 0) {
-      std::unique_ptr<common::Value> value(tuple1->GetValue(src_col_id));
-      dest->SetValue(dest_col_id, *value, pool);
-    }
-    else {
-      std::unique_ptr<common::Value> value(tuple2->GetValue(src_col_id));
-      dest->SetValue(dest_col_id, *value, pool);
+      type::Value value = (tuple1->GetValue(src_col_id));
+      dest->SetValue(dest_col_id, value, pool);
+    } else {
+      type::Value value = (tuple2->GetValue(src_col_id));
+      dest->SetValue(dest_col_id, value, pool);
     }
   }
 
   return true;
 }
 
-
-bool ProjectInfo::Evaluate(AbstractTuple *dest, 
-                           const AbstractTuple *tuple1,
+bool ProjectInfo::Evaluate(AbstractTuple *dest, const AbstractTuple *tuple1,
                            const AbstractTuple *tuple2,
                            executor::ExecutorContext *econtext) const {
   // (A) Execute target list
   for (auto target : target_list_) {
     auto col_id = target.first;
-    auto expr = target.second;
+    auto expr = target.second.expr;
     auto value = expr->Evaluate(tuple1, tuple2, econtext);
-    dest->SetValue(col_id, *value);
+    dest->SetValue(col_id, value);
   }
 
   // (B) Execute direct map
@@ -103,16 +99,63 @@ bool ProjectInfo::Evaluate(AbstractTuple *dest,
     auto src_col_id = dm.second.second;
 
     if (tuple_index == 0) {
-      std::unique_ptr<common::Value> val1(tuple1->GetValue(src_col_id));
-      dest->SetValue(dest_col_id, *val1);
-    }
-    else {
-      std::unique_ptr<common::Value> val2(tuple2->GetValue(src_col_id));
-      dest->SetValue(dest_col_id, *val2);
+      type::Value val1 = (tuple1->GetValue(src_col_id));
+      dest->SetValue(dest_col_id, val1);
+    } else {
+      type::Value val2 = (tuple2->GetValue(src_col_id));
+      dest->SetValue(dest_col_id, val2);
     }
   }
 
   return true;
+}
+
+void ProjectInfo::PerformRebinding(
+    BindingContext &output_context,
+    const std::vector<const BindingContext *> &input_contexts) const {
+  // (A) First go over the direct mapping, mapping attributes from the
+  // appropriate input context to the output context
+  for (auto &dm : direct_map_list_) {
+    oid_t dest_col_id = dm.first;
+    oid_t src_col_id = dm.second.second;
+
+    const BindingContext *src_context = input_contexts[dm.second.first];
+    const auto *dest_ai = src_context->Find(src_col_id);
+    LOG_DEBUG("Direct: Dest col %u is bound to AI %p", dest_col_id, dest_ai);
+    output_context.BindNew(dest_col_id, dest_ai);
+  }
+
+  // (B) Add the attributes produced by the target list expressions
+  for (auto &target : target_list_) {
+    oid_t dest_col_id = target.first;
+    auto &derived_attribute = const_cast<DerivedAttribute &>(target.second);
+
+    PL_ASSERT(derived_attribute.expr != nullptr);
+
+    LOG_DEBUG("Binding target-list expressions ...");
+    auto *expr =
+        const_cast<expression::AbstractExpression *>(derived_attribute.expr);
+    expr->PerformBinding(input_contexts);
+
+    // Setup the result type of the derived attribute
+    derived_attribute.attribute_info.type = expr->ResultType();
+
+    const auto *dest_ai = &derived_attribute.attribute_info;
+    LOG_DEBUG("Target: Dest col %u is bound to AI %p", dest_col_id, dest_ai);
+    output_context.BindNew(dest_col_id, dest_ai);
+  }
+}
+
+void ProjectInfo::PartitionInputs(
+    std::vector<std::vector<oid_t>> &input) const {
+  for (const auto &dm : direct_map_list_) {
+    oid_t src_input = dm.second.first;
+    oid_t src_input_col = dm.second.second;
+    if (src_input >= input.size()) {
+      input.resize(src_input + 1);
+    }
+    input[src_input].push_back(src_input_col);
+  }
 }
 
 std::string ProjectInfo::Debug() const {
@@ -120,7 +163,7 @@ std::string ProjectInfo::Debug() const {
   buffer << "Target List: < DEST_column_id , expression >\n";
   for (auto &target : target_list_) {
     buffer << "Dest Col id: " << target.first << std::endl;
-    buffer << "Expr: \n" << target.second->GetInfo();
+    buffer << "Expr: \n" << target.second.expr->GetInfo();
     buffer << std::endl;
   }
   buffer << "DirectMap List: < NEW_col_id , <tuple_idx , OLD_col_id>  > \n";
@@ -132,35 +175,5 @@ std::string ProjectInfo::Debug() const {
   return (buffer.str());
 }
 
-void ProjectInfo::transformParameterToConstantValueExpression(
-    std::vector<common::Value *> *values, catalog::Schema *schema) {
-  LOG_TRACE("Setting parameter values in Projection");
-  for (unsigned int i = 0; i < target_list_.size(); ++i) {
-    // The assignment parameter is an expression with left and right
-    if (target_list_[i].second->GetLeft() &&
-        target_list_[i].second->GetRight()) {
-      auto expr = target_list_[i].second->Copy();
-      delete target_list_[i].second;
-      expression::ExpressionUtil::ConvertParameterExpressions(expr, values,
-                                                              schema);
-      target_list_[i].second = expr;
-    }
-    // The assignment parameter is a single value
-    else {
-      if (target_list_[i].second->GetExpressionType() ==
-          EXPRESSION_TYPE_VALUE_PARAMETER) {
-        auto param_expr =
-            (expression::ParameterValueExpression *)target_list_[i].second;
-        LOG_TRACE("Setting parameter %u to value %s", param_expr->GetValueIdx(),
-                  values->at(param_expr->GetValueIdx())->GetInfo().c_str());
-        auto value = new expression::ConstantValueExpression(
-            *values->at(param_expr->GetValueIdx()));
-        delete param_expr;
-        target_list_[i].second = value;
-      }
-    }
-  }
-}
-
-} /* namespace planner */
-} /* namespace peloton */
+}  // namespace planner
+}  // namespace peloton

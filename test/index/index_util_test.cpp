@@ -56,20 +56,20 @@ static index::Index *BuildIndex() {
   // The size of the key is:
   //   integer 4 * 3 = total 12
 
-  catalog::Column column0(common::Type::INTEGER,
-                          common::Type::GetTypeSize(common::Type::INTEGER), "A",
+  catalog::Column column0(type::TypeId::INTEGER,
+                          type::Type::GetTypeSize(type::TypeId::INTEGER), "A",
                           true);
 
-  catalog::Column column1(common::Type::VARCHAR, 1024, "B", false);
+  catalog::Column column1(type::TypeId::VARCHAR, 1024, "B", false);
 
   // The following twoc constitutes tuple schema but does not appear in index
 
-  catalog::Column column2(common::Type::DECIMAL,
-                          common::Type::GetTypeSize(common::Type::DECIMAL), "C",
+  catalog::Column column2(type::TypeId::DECIMAL,
+                          type::Type::GetTypeSize(type::TypeId::DECIMAL), "C",
                           true);
 
-  catalog::Column column3(common::Type::INTEGER,
-                          common::Type::GetTypeSize(common::Type::INTEGER), "D",
+  catalog::Column column3(type::TypeId::INTEGER,
+                          type::Type::GetTypeSize(type::TypeId::INTEGER), "D",
                           true);
 
   // Use all four columns to build tuple schema
@@ -106,12 +106,12 @@ static index::Index *BuildIndex() {
   // For testing IntsKey and TupleKey we need more test cases
   index::IndexMetadata *index_metadata = new index::IndexMetadata(
       "index_util_test", 88888,  // Index oid
-      INVALID_OID, INVALID_OID, INDEX_TYPE_BWTREE,
-      INDEX_CONSTRAINT_TYPE_DEFAULT, tuple_schema.get(), key_schema, key_attrs,
+      INVALID_OID, INVALID_OID, IndexType::BWTREE,
+      IndexConstraintType::DEFAULT, tuple_schema.get(), key_schema, key_attrs,
       true);  // unique_keys
 
   // Build index
-  index::Index *index = index::IndexFactory::GetInstance(index_metadata);
+  index::Index *index = index::IndexFactory::GetIndex(index_metadata);
 
   // Actually this will never be hit since if index creation fails an exception
   // would be raised (maybe out of memory would result in a nullptr? Anyway
@@ -138,95 +138,91 @@ TEST_F(IndexUtilTests, FindValueIndexTest) {
 
   // Test basic
 
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {3, 0, 1},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, true);
   value_index_list.clear();
 
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {1, 0, 3},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, true);
   value_index_list.clear();
 
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {0, 1, 3},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, true);
   value_index_list.clear();
 
   // Test whether reconizes if only two columns are matched
 
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {0, 1},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
 
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {3, 0},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
 
   // Test empty
 
-  ret = FindValueIndex(index_p->GetMetadata(), {}, {}, value_index_list);
+  ret = IndexUtil::FindValueIndex(index_p->GetMetadata(), {}, {}, value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
 
   // Test redundant conditions
 
   // This should return false, since the < already defines a lower bound
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {0, 3, 3, 0, 3, 1},
-      {EXPRESSION_TYPE_COMPARE_LESSTHAN, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_LESSTHAN, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_LESSTHAN, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_LESSTHAN, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
 
   // This should return true
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {0, 3, 3, 0, 3, 1},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_LESSTHAN, EXPRESSION_TYPE_COMPARE_LESSTHAN,
-       EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_LESSTHAN, ExpressionType::COMPARE_LESSTHAN,
+       ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, true);
   value_index_list.clear();
 
   // Test duplicated conditions on a single column
-
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {3, 3, 3},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_EQUAL},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_EQUAL},
       value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
 
-  //
   // The last test should logically be classified as point query
   // but our procedure does not give positive result to reduce
   // the complexity
-  //
-
-  ret = FindValueIndex(
+  ret = IndexUtil::FindValueIndex(
       index_p->GetMetadata(), {3, 0, 1, 0},
-      {EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO,
-       EXPRESSION_TYPE_COMPARE_EQUAL,
-       EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO},
+      {ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_LESSTHANOREQUALTO,
+       ExpressionType::COMPARE_EQUAL,
+       ExpressionType::COMPARE_GREATERTHANOREQUALTO},
       value_index_list);
   EXPECT_EQ(ret, false);
   value_index_list.clear();
@@ -246,22 +242,22 @@ TEST_F(IndexUtilTests, ConstructBoundaryKeyTest) {
   // This is the output variable
   std::vector<std::pair<oid_t, oid_t>> value_index_list{};
 
-  std::vector<common::Value *> value_list{};
+  std::vector<type::Value> value_list{};
   std::vector<oid_t> tuple_column_id_list{};
   std::vector<ExpressionType> expr_list{};
 
   value_list = {
-      common::ValueFactory::GetIntegerValue(100).Copy(),
-      common::ValueFactory::GetIntegerValue(200).Copy(),
-      common::ValueFactory::GetIntegerValue(50).Copy(),
+      type::ValueFactory::GetIntegerValue(100).Copy(),
+      type::ValueFactory::GetIntegerValue(200).Copy(),
+      type::ValueFactory::GetIntegerValue(50).Copy(),
   };
 
   tuple_column_id_list = {3, 3, 0};
 
   expr_list = {
-      EXPRESSION_TYPE_COMPARE_GREATERTHAN,
-      EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO,
-      EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO,
+      ExpressionType::COMPARE_GREATERTHAN,
+      ExpressionType::COMPARE_LESSTHANOREQUALTO,
+      ExpressionType::COMPARE_GREATERTHANOREQUALTO,
   };
 
   IndexScanPredicate isp{};
@@ -295,9 +291,8 @@ TEST_F(IndexUtilTests, ConstructBoundaryKeyTest) {
   // The condition means first index column does not equal 100
   ///////////////////////////////////////////////////////////////////
 
-  for (auto val : value_list) delete val;
   value_list = {
-      common::ValueFactory::GetIntegerValue(100).Copy(),
+      type::ValueFactory::GetIntegerValue(100).Copy(),
   };
 
   tuple_column_id_list = {
@@ -305,7 +300,7 @@ TEST_F(IndexUtilTests, ConstructBoundaryKeyTest) {
   };
 
   expr_list = {
-      EXPRESSION_TYPE_COMPARE_NOTEQUAL,
+      ExpressionType::COMPARE_NOTEQUAL,
   };
 
   isp.AddConjunctionScanPredicate(index_p, value_list, tuple_column_id_list,
@@ -327,18 +322,17 @@ TEST_F(IndexUtilTests, ConstructBoundaryKeyTest) {
 
   IndexScanPredicate isp2{};
 
-  for (auto val : value_list) delete val;
   value_list = {
-      common::ValueFactory::GetIntegerValue(100).Copy(),
-      common::ValueFactory::GetVarcharValue("Peloton!").Copy(),
-      common::ValueFactory::GetIntegerValue(50).Copy(),
+      type::ValueFactory::GetIntegerValue(100).Copy(),
+      type::ValueFactory::GetVarcharValue("Peloton!").Copy(),
+      type::ValueFactory::GetIntegerValue(50).Copy(),
   };
 
   tuple_column_id_list = {3, 1, 0};
 
   expr_list = {
-      EXPRESSION_TYPE_COMPARE_EQUAL, EXPRESSION_TYPE_COMPARE_EQUAL,
-      EXPRESSION_TYPE_COMPARE_EQUAL,
+      ExpressionType::COMPARE_EQUAL, ExpressionType::COMPARE_EQUAL,
+      ExpressionType::COMPARE_EQUAL,
   };
 
   isp2.AddConjunctionScanPredicate(index_p, value_list, tuple_column_id_list,
@@ -360,8 +354,6 @@ TEST_F(IndexUtilTests, ConstructBoundaryKeyTest) {
   ///////////////////////////////////////////////////////////////////
   delete index_p;
 
-  for (auto val : value_list) delete val;
-
   return;
 }
 
@@ -374,22 +366,22 @@ TEST_F(IndexUtilTests, BindKeyTest) {
   // This is the output variable
   std::vector<std::pair<oid_t, oid_t>> value_index_list{};
 
-  std::vector<common::Value *> value_list{};
+  std::vector<type::Value> value_list{};
   std::vector<oid_t> tuple_column_id_list{};
   std::vector<ExpressionType> expr_list{};
 
   value_list = {
-      common::ValueFactory::GetParameterOffsetValue(2).Copy(),
-      common::ValueFactory::GetParameterOffsetValue(0).Copy(),
-      common::ValueFactory::GetParameterOffsetValue(1).Copy(),
+      type::ValueFactory::GetParameterOffsetValue(2).Copy(),
+      type::ValueFactory::GetParameterOffsetValue(0).Copy(),
+      type::ValueFactory::GetParameterOffsetValue(1).Copy(),
   };
 
   tuple_column_id_list = {3, 3, 0};
 
   expr_list = {
-      EXPRESSION_TYPE_COMPARE_GREATERTHAN,
-      EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO,
-      EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO,
+      ExpressionType::COMPARE_GREATERTHAN,
+      ExpressionType::COMPARE_LESSTHANOREQUALTO,
+      ExpressionType::COMPARE_GREATERTHANOREQUALTO,
   };
 
   IndexScanPredicate isp{};
@@ -417,13 +409,13 @@ TEST_F(IndexUtilTests, BindKeyTest) {
   LOG_INFO("High key (NOT BINDED) = %s", cl[0].GetHighKey()->GetInfo().c_str());
 
   // Bind real value
-  std::unique_ptr<common::Value> val1(
-      common::ValueFactory::GetIntegerValue(100).Copy());
-  std::unique_ptr<common::Value> val2(
-      common::ValueFactory::GetIntegerValue(200).Copy());
-  std::unique_ptr<common::Value> val3(
-      common::ValueFactory::GetIntegerValue(300).Copy());
-  isp.LateBindValues(index_p, {val1.get(), val2.get(), val3.get()});
+  type::Value val1 = (
+      type::ValueFactory::GetIntegerValue(100).Copy());
+  type::Value val2 = (
+      type::ValueFactory::GetIntegerValue(200).Copy());
+  type::Value val3 = (
+      type::ValueFactory::GetIntegerValue(300).Copy());
+  isp.LateBindValues(index_p, {val1, val2, val3});
 
   // This is important - Since binding does not change the number of
   // binding points, and their information is preserved for next
@@ -439,10 +431,8 @@ TEST_F(IndexUtilTests, BindKeyTest) {
   ///////////////////////////////////////////////////////////////////
   delete index_p;
 
-  for (auto val : value_list) delete val;
-
   return;
 }
 
-}  // End test namespace
-}  // End peloton namespace
+}  // namespace test
+}  // namespace peloton

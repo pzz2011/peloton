@@ -12,8 +12,8 @@
 
 #include "planner/create_plan.h"
 
+#include "parser/create_statement.h"
 #include "storage/data_table.h"
-#include "parser/statement_create.h"
 #include "catalog/schema.h"
 #include "catalog/column.h"
 
@@ -40,26 +40,35 @@ CreatePlan::CreatePlan(parser::CreateStatement *parse_tree) {
   std::vector<catalog::Column> columns;
   std::vector<catalog::Constraint> column_contraints;
   if (parse_tree->type == parse_tree->CreateType::kTable) {
-    create_type = CreateType::CREATE_TYPE_TABLE;
+    create_type = CreateType::TABLE;
     for (auto col : *parse_tree->columns) {
-      common::Type::TypeId val = col->GetValueType(col->type);
+      // TODO: Currently, the parser will parse the foreign key constraint and
+      // put it into a ColumnDefinition. Later when we implement constraint
+      // we may need to change this. Just skip foreign key constraint for now
+      if (col->type == parser::ColumnDefinition::FOREIGN)
+        continue;
+        
+      type::TypeId val = col->GetValueType(col->type);
 
       LOG_TRACE("Column name: %s; Is primary key: %d", col->name, col->primary);
 
       // Check main constraints
       if (col->primary) {
-        catalog::Constraint constraint(CONSTRAINT_TYPE_PRIMARY, "con_primary");
+        catalog::Constraint constraint(ConstraintType::PRIMARY, "con_primary");
         column_contraints.push_back(constraint);
         LOG_TRACE("Added a primary key constraint on column \"%s\"", col->name);
       }
 
       if (col->not_null) {
-        catalog::Constraint constraint(CONSTRAINT_TYPE_NOTNULL, "con_not_null");
+        catalog::Constraint constraint(ConstraintType::NOTNULL, "con_not_null");
         column_contraints.push_back(constraint);
       }
 
-      auto column = catalog::Column(val, common::Type::GetTypeSize(val),
+      auto column = catalog::Column(val, type::Type::GetTypeSize(val),
           std::string(col->name), false);
+      if (!column.IsInlined()) {
+        column.SetLength(col->varlen);
+      }
       for (auto con : column_contraints) {
         column.AddConstraint(con);
       }
@@ -71,7 +80,7 @@ CreatePlan::CreatePlan(parser::CreateStatement *parse_tree) {
     table_schema = schema;
   }
   if (parse_tree->type == parse_tree->CreateType::kIndex) {
-    create_type = CreateType::CREATE_TYPE_INDEX;
+    create_type = CreateType::INDEX;
     index_name = std::string(parse_tree->index_name);
     table_name = std::string(parse_tree->GetTableName());
 

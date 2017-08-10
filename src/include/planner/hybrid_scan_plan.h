@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "common/types.h"
+#include "type/types.h"
 #include "expression/abstract_expression.h"
 #include "index/index.h"
 #include "planner/abstract_scan_plan.h"
@@ -30,20 +30,13 @@ namespace planner {
 
 class HybridScanPlan : public AbstractScan {
  public:
-  HybridScanPlan(const HybridScanPlan &) = delete;
-  HybridScanPlan &operator=(const HybridScanPlan &) = delete;
-  HybridScanPlan(HybridScanPlan &&) = delete;
-  HybridScanPlan &operator=(HybridScanPlan &&) = delete;
-
   HybridScanPlan(storage::DataTable *table,
                  expression::AbstractExpression *predicate,
                  const std::vector<oid_t> &column_ids,
                  const IndexScanPlan::IndexScanDesc &index_scan_desc,
                  HybridScanType hybrid_scan_type);
 
-  ~HybridScanPlan() {
-    for (auto val : values_) delete val;
-  }
+  ~HybridScanPlan() {}
 
   std::shared_ptr<index::Index> GetDataIndex() const { return index_; }
 
@@ -51,7 +44,7 @@ class HybridScanPlan : public AbstractScan {
     return std::unique_ptr<AbstractPlan>(nullptr);
   }
 
-  PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_SEQSCAN; }
+  PlanNodeType GetPlanNodeType() const { return PlanNodeType::SEQSCAN; }
 
   std::shared_ptr<index::Index> GetIndex() const { return index_; }
 
@@ -67,7 +60,7 @@ class HybridScanPlan : public AbstractScan {
     return index_predicate_;
   }
 
-  const std::vector<common::Value *> &GetValues() const { return values_; }
+  const std::vector<type::Value> &GetValues() const { return values_; }
 
   const std::vector<expression::AbstractExpression *> &GetRunTimeKeys() const {
     return runtime_keys_;
@@ -76,7 +69,7 @@ class HybridScanPlan : public AbstractScan {
   HybridScanType GetHybridType() const { return type_; }
 
  private:
-  HybridScanType type_ = HYBRID_SCAN_TYPE_INVALID;
+  HybridScanType type_ = HybridScanType::INVALID;
 
   const std::vector<oid_t> column_ids_;
 
@@ -84,13 +77,16 @@ class HybridScanPlan : public AbstractScan {
 
   const std::vector<ExpressionType> expr_types_;
 
-  const std::vector<common::Value *> values_;
+  const std::vector<type::Value> values_;
 
   const std::vector<expression::AbstractExpression *> runtime_keys_;
 
   std::shared_ptr<index::Index> index_;
 
   index::IndexScanPredicate index_predicate_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(HybridScanPlan);
 };
 
 }  // namespace planner

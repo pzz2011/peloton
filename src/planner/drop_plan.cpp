@@ -12,8 +12,8 @@
 
 #include "planner/drop_plan.h"
 
+#include "parser/drop_statement.h"
 #include "storage/data_table.h"
-#include "parser/statement_drop.h"
 #include "catalog/catalog.h"
 
 namespace peloton {
@@ -24,23 +24,23 @@ DropPlan::DropPlan(storage::DataTable *table) {
   missing = false;
 }
 
-DropPlan::DropPlan(std::string name) {
+DropPlan::DropPlan(std::string name, concurrency::Transaction *txn) {
   table_name = name;
   target_table_ = catalog::Catalog::GetInstance()->GetTableWithName(
-      DEFAULT_DB_NAME, table_name);
+      DEFAULT_DB_NAME, table_name, txn);
   missing = false;
 }
 
-DropPlan::DropPlan(parser::DropStatement *parse_tree) {
+DropPlan::DropPlan(parser::DropStatement *parse_tree,
+                   concurrency::Transaction *txn) {
   table_name = parse_tree->GetTableName();
   // Set it up for the moment , cannot seem to find it in DropStatement
   missing = parse_tree->missing;
 
   try {
     target_table_ = catalog::Catalog::GetInstance()->GetTableWithName(
-        parse_tree->GetDatabaseName(), table_name);
-  }
-  catch (CatalogException &e) {
+        parse_tree->GetDatabaseName(), table_name, txn);
+  } catch (CatalogException &e) {
     // Dropping a table which doesn't exist
     if (missing == false) {
       throw e;

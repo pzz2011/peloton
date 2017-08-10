@@ -16,7 +16,6 @@
 #include <map>
 #include <vector>
 #include <unordered_map>
-#include <iostream>
 #include <condition_variable>
 #include <string>
 #include <fstream>
@@ -143,8 +142,8 @@ class StatsAggregator {
   // Whether the aggregator is running
   bool is_aggregating_ = false;
 
-  // Varlen Pool to hold query strings
-  std::unique_ptr<common::VarlenPool> pool_;
+  // Abstract Pool to hold query strings
+  std::unique_ptr<type::AbstractPool> pool_;
 
   //===--------------------------------------------------------------------===//
   // HELPER FUNCTIONS

@@ -277,6 +277,7 @@ distribute/*
 *.bin
 cmake_build
 .cmake_build
+cmake-build-debug
 
 # Bison/Flex
 sql_parser.cpp
@@ -309,3 +310,6 @@ docs/dev
 
 # Third party
 third_party/gflags/
+
+# Test output file logs to ignore
+stats_log

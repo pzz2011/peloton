@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "executor/testing_executor_util.h"
 #include "common/harness.h"
 
 #include "planner/projection_plan.h"
@@ -26,7 +27,6 @@
 #include "storage/data_table.h"
 #include "concurrency/transaction_manager_factory.h"
 
-#include "executor/executor_tests_util.h"
 #include "executor/mock_executor.h"
 #include "common/harness.h"
 
@@ -64,8 +64,8 @@ TEST_F(ProjectionTests, BasicTest) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tile_size));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), tile_size, false, false,
+      TestingExecutorUtil::CreateTable(tile_size));
+  TestingExecutorUtil::PopulateTable(data_table.get(), tile_size, false, false,
                                    false, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -121,8 +121,8 @@ TEST_F(ProjectionTests, TwoColumnTest) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tile_size));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), tile_size, false, false,
+      TestingExecutorUtil::CreateTable(tile_size));
+  TestingExecutorUtil::PopulateTable(data_table.get(), tile_size, false, false,
                                    false, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -185,8 +185,8 @@ TEST_F(ProjectionTests, BasicTargetTest) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tile_size));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), tile_size, false, false,
+      TestingExecutorUtil::CreateTable(tile_size));
+  TestingExecutorUtil::PopulateTable(data_table.get(), tile_size, false, false,
                                    false, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -217,15 +217,17 @@ TEST_F(ProjectionTests, BasicTargetTest) {
 
   // target list
   auto const_val = new expression::ConstantValueExpression(
-      common::ValueFactory::GetIntegerValue(20));
+      type::ValueFactory::GetIntegerValue(20));
   auto tuple_value_expr =
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 0);
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0, 0);
   expression::AbstractExpression *expr =
-      expression::ExpressionUtil::OperatorFactory(EXPRESSION_TYPE_OPERATOR_PLUS,
-                                                  common::Type::INTEGER,
+      expression::ExpressionUtil::OperatorFactory(ExpressionType::OPERATOR_PLUS,
+                                                  type::TypeId::INTEGER,
                                                   tuple_value_expr, const_val);
 
-  Target target = std::make_pair(1, expr);
+  planner::DerivedAttribute attribute{expr};
+
+  Target target = std::make_pair(1, attribute);
   target_list.push_back(target);
 
   std::unique_ptr<const planner::ProjectInfo> project_info(

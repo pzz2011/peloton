@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "optimizer/pattern.h"
 
 namespace peloton {
@@ -28,5 +27,5 @@ const std::vector<std::shared_ptr<Pattern>> &Pattern::Children() const {
 
 OpType Pattern::Type() const { return _type; }
 
-} /* namespace optimizer */
-} /* namespace peloton */
+}  // namespace optimizer
+}  // namespace peloton

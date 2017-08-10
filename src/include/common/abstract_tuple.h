@@ -10,11 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include "common/types.h"
-#include "common/value.h"
+#include "common/printable.h"
+#include "type/types.h"
+#include "type/value.h"
 
 namespace peloton {
 
@@ -26,15 +26,15 @@ class Schema;
 // Tuple Interface
 //===--------------------------------------------------------------------===//
 
-class AbstractTuple {
+class AbstractTuple : public Printable {
  public:
   virtual ~AbstractTuple(){};
 
   /** @brief Get the value at the given column id. */
-  virtual common::Value *GetValue(oid_t column_id) const = 0;
+  virtual type::Value GetValue(oid_t column_id) const = 0;
 
   /** @brief Set the value at the given column id. */
-  virtual void SetValue(oid_t column_id, const common::Value &value) = 0;
+  virtual void SetValue(oid_t column_id, const type::Value &value) = 0;
 
   /** @brief Get the raw location of the tuple's contents i.e. tuple.value_data.
    */

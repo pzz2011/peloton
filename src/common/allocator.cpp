@@ -18,6 +18,8 @@
 #include <execinfo.h>
 #include <unistd.h>
 
+#include "common/stack_trace.h"
+
 // We will use jemalloc at link time. jemalloc library has already mangled the symbols
 // to be malloc, calloc, etc.
 
@@ -34,7 +36,7 @@ void *do_allocation(size_t size, bool do_throw) {
 
 void do_deletion(void *location) { free(location); }
 
-}  // End peloton namespace
+}  // namespace peloton
 
 void *operator new(size_t size) throw(std::bad_alloc) {
   return peloton::do_allocation(size, true);

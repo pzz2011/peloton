@@ -10,10 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
+#include "common/sql_node_visitor.h"
 #include "expression/abstract_expression.h"
+#include "type/value_factory.h"
 
 namespace peloton {
 namespace expression {
@@ -22,49 +23,64 @@ namespace expression {
 // ComparisonExpression
 //===----------------------------------------------------------------------===//
 
-using namespace peloton::common;
-
 class ComparisonExpression : public AbstractExpression {
  public:
+  // TODO: Should we delete left and right if they are not nullptr?
   ~ComparisonExpression() {}
-  
+
   ComparisonExpression(ExpressionType type)
-    : AbstractExpression(type, Type::BOOLEAN) {}
+      : AbstractExpression(type, type::TypeId::BOOLEAN) {}
 
-  ComparisonExpression(ExpressionType type,
-                       AbstractExpression *left,
+  ComparisonExpression(ExpressionType type, AbstractExpression *left,
                        AbstractExpression *right)
-    : AbstractExpression(type, Type::BOOLEAN, left, right) {}
+      : AbstractExpression(type, type::TypeId::BOOLEAN, left, right) {}
 
-  std::unique_ptr<Value> Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
-      UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
-      UNUSED_ATTRIBUTE executor::ExecutorContext *context) const override {
-    auto vl = left_->Evaluate(tuple1, tuple2, context);
-    auto vr = right_->Evaluate(tuple1, tuple2, context);
+  type::Value Evaluate(
+      const AbstractTuple *tuple1,
+      const AbstractTuple *tuple2,
+      executor::ExecutorContext *context) const override {
+    PL_ASSERT(children_.size() == 2);
+    auto vl = children_[0]->Evaluate(tuple1, tuple2, context);
+    auto vr = children_[1]->Evaluate(tuple1, tuple2, context);
     switch (exp_type_) {
-      case (EXPRESSION_TYPE_COMPARE_EQUAL):
-        return std::unique_ptr<Value>(vl->CompareEquals(*vr));
-      case (EXPRESSION_TYPE_COMPARE_NOTEQUAL):
-        return std::unique_ptr<Value>(vl->CompareNotEquals(*vr));
-      case (EXPRESSION_TYPE_COMPARE_LESSTHAN):
-        return std::unique_ptr<Value>(vl->CompareLessThan(*vr));
-      case (EXPRESSION_TYPE_COMPARE_GREATERTHAN):
-        return std::unique_ptr<Value>(vl->CompareGreaterThan(*vr));
-      case (EXPRESSION_TYPE_COMPARE_LESSTHANOREQUALTO):
-        return std::unique_ptr<Value>(vl->CompareLessThanEquals(*vr));
-      case (EXPRESSION_TYPE_COMPARE_GREATERTHANOREQUALTO):
-        return std::unique_ptr<Value>(vl->CompareGreaterThanEquals(*vr));
+      case (ExpressionType::COMPARE_EQUAL):
+        return type::ValueFactory::GetBooleanValue(vl.CompareEquals(vr));
+      case (ExpressionType::COMPARE_NOTEQUAL):
+        return type::ValueFactory::GetBooleanValue(vl.CompareNotEquals(vr));
+      case (ExpressionType::COMPARE_LESSTHAN):
+        return type::ValueFactory::GetBooleanValue(vl.CompareLessThan(vr));
+      case (ExpressionType::COMPARE_GREATERTHAN):
+        return type::ValueFactory::GetBooleanValue(vl.CompareGreaterThan(vr));
+      case (ExpressionType::COMPARE_LESSTHANOREQUALTO):
+        return type::ValueFactory::GetBooleanValue(
+            vl.CompareLessThanEquals(vr));
+      case (ExpressionType::COMPARE_GREATERTHANOREQUALTO):
+        return type::ValueFactory::GetBooleanValue(
+            vl.CompareGreaterThanEquals(vr));
+      case (ExpressionType::COMPARE_DISTINCT_FROM): {
+        if (vl.IsNull() && vr.IsNull()) {
+          return type::ValueFactory::GetBooleanValue(false);
+        }
+        else if (!vl.IsNull() && !vr.IsNull()) {
+          return type::ValueFactory::GetBooleanValue(vl.CompareNotEquals(vr));
+        }
+        return type::ValueFactory::GetBooleanValue(true);
+      }
       default:
         throw Exception("Invalid comparison expression type.");
     }
   }
 
   AbstractExpression *Copy() const override {
-    return new ComparisonExpression(exp_type_,
-                                    left_ ? left_->Copy() : nullptr,
-                                    right_ ? right_->Copy() : nullptr);
+    return new ComparisonExpression(*this);
   }
+
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
+ protected:
+  ComparisonExpression(const ComparisonExpression &other)
+      : AbstractExpression(other) {}
 };
 
-}  // End expression namespace
-}  // End peloton namespace
+}  // namespace expression
+}  // namespace peloton

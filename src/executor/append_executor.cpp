@@ -6,15 +6,13 @@
 //
 // Identification: src/executor/append_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #include "common/logger.h"
 #include "executor/logical_tile.h"
 #include "executor/append_executor.h"
-
 #include "planner/append_plan.h"
 
 namespace peloton {
@@ -53,5 +51,5 @@ bool AppendExecutor::DExecute() {
   return false;
 }
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

@@ -10,15 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <unistd.h>
 #include <iostream>
 
-#include "common/stack_trace.h"
+#include "configuration/configuration.h"
 #include "common/init.h"
-#include "common/config.h"
-#include "common/macros.h"
-#include "wire/libevent_server.h"
-#include "wire/socket_base.h"
+#include "common/logger.h"
+#include "network/network_manager.h"
 
 // Peloton process begins execution here.
 int main(int argc, char *argv[]) {
@@ -33,11 +30,24 @@ int main(int argc, char *argv[]) {
     ::google::HandleCommandLineHelpFlags();
   }
 
-  // Setup
-  peloton::PelotonInit::Initialize();
+  // Print configuration
+  if (FLAGS_display_configuration == true) {
+    peloton::configuration::PrintConfiguration();
+  }
 
-  // Launch server
-  peloton::wire::Server server;
+  try {
+    // Setup
+    peloton::PelotonInit::Initialize();
+
+    // Create NetworkManager object
+    peloton::network::NetworkManager network_manager;
+    
+    // Start NetworkManager
+    network_manager.StartServer();
+  }
+  catch(peloton::ConnectionException exception){
+    // Nothing to do here!
+  }
 
   // Teardown
   peloton::PelotonInit::Shutdown();

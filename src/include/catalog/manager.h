@@ -20,7 +20,7 @@
 #include <memory>
 
 #include "common/macros.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "container/lock_free_array.h"
 
 namespace peloton {
@@ -108,5 +108,5 @@ class Manager {
   static std::shared_ptr<storage::IndirectionArray> empty_indirection_array_;
 };
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

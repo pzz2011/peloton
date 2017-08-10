@@ -10,20 +10,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
+#include "common/container_tuple.h"
 #include "common/logger.h"
+#include "common/macros.h"
 #include "common/platform.h"
 #include "common/printable.h"
-#include "common/macros.h"
 #include "concurrency/transaction_manager_factory.h"
-#include "expression/container_tuple.h"
 #include "gc/gc_manager.h"
 #include "logging/log_manager.h"
-#include "storage/storage_manager.h"
+#include "storage/backend_manager.h"
 #include "storage/tile_group_header.h"
 
 namespace peloton {
@@ -40,9 +39,10 @@ TileGroupHeader::TileGroupHeader(const BackendType &backend_type,
   header_size = num_tuple_slots * header_entry_size;
 
   // allocate storage space for header
-  auto &storage_manager = storage::StorageManager::GetInstance();
-  data = reinterpret_cast<char *>(
-      storage_manager.Allocate(backend_type, header_size));
+  // auto &storage_manager = storage::StorageManager::GetInstance();
+  // data = reinterpret_cast<char *>(
+  // storage_manager.Allocate(backend_type, header_size));
+  data = new char[header_size];
   PL_ASSERT(data != nullptr);
 
   // zero out the data
@@ -61,9 +61,9 @@ TileGroupHeader::TileGroupHeader(const BackendType &backend_type,
 
 TileGroupHeader::~TileGroupHeader() {
   // reclaim the space
-  auto &storage_manager = storage::StorageManager::GetInstance();
-  storage_manager.Release(backend_type, data);
-
+  // auto &storage_manager = storage::StorageManager::GetInstance();
+  // storage_manager.Release(backend_type, data);
+  delete[] data;
   data = nullptr;
 }
 
@@ -74,53 +74,96 @@ TileGroupHeader::~TileGroupHeader() {
 const std::string TileGroupHeader::GetInfo() const {
   std::ostringstream os;
 
-  os << "\t-----------------------------------------------------------\n";
-  os << "\tTILE GROUP HEADER \n";
+  os << "TILE GROUP HEADER (";
+  os << "Address:" << this << ", ";
+  os << "NumActiveTuples:";
+  os << GetActiveTupleCount();
+  os << ")";
+  os << std::endl;
+
+  std::string spacer = StringUtil::Repeat(" ", TUPLE_ID_WIDTH + 2);
 
   oid_t active_tuple_slots = GetCurrentNextTupleSlot();
-  peloton::ItemPointer item;
-
   for (oid_t header_itr = 0; header_itr < active_tuple_slots; header_itr++) {
     txn_id_t txn_id = GetTransactionId(header_itr);
     cid_t beg_commit_id = GetBeginCommitId(header_itr);
     cid_t end_commit_id = GetEndCommitId(header_itr);
 
-    int width = 10;
-    os << "\t txn id : ";
+    if (header_itr > 0) os << std::endl;
+    os << std::right << std::setfill('0') << std::setw(TUPLE_ID_WIDTH)
+       << header_itr << ": ";
+
+    // TRANSACTION ID
+    os << "TxnId:";
     if (txn_id == MAX_TXN_ID)
-      os << std::setw(width) << "MAX_TXN_ID";
+      os << std::left << std::setfill(' ') << std::setw(TXN_ID_WIDTH)
+         << "MAX_TXN_ID";
     else
-      os << std::setw(width) << txn_id;
+      os << std::right << std::setfill('0') << std::setw(TXN_ID_WIDTH)
+         << txn_id;
+    os << " ";
 
-    os << " beg cid : ";
+    // BEGIN COMMIT ID
+    os << "BeginCommitId:";
     if (beg_commit_id == MAX_CID)
-      os << std::setw(width) << "MAX_CID";
+      os << std::left << std::setfill(' ') << std::setw(TXN_ID_WIDTH)
+         << "MAX_CID";
     else
-      os << std::setw(width) << beg_commit_id;
+      os << std::right << std::setfill('0') << std::setw(TXN_ID_WIDTH)
+         << beg_commit_id;
+    os << " ";
 
-    os << " end cid : ";
+    // END COMMIT ID
+    os << "EndCId:";
     if (end_commit_id == MAX_CID)
-      os << std::setw(width) << "MAX_CID";
+      os << std::left << std::setfill(' ') << std::setw(TXN_ID_WIDTH)
+         << "MAX_CID";
     else
-      os << std::setw(width) << end_commit_id;
+      os << std::right << std::setfill('0') << std::setw(TXN_ID_WIDTH)
+         << end_commit_id;
+    os << std::endl;
+    os << spacer;
 
-    peloton::ItemPointer location = GetNextItemPointer(header_itr);
-    peloton::ItemPointer location2 = GetPrevItemPointer(header_itr);
-    os << " next : "
-       << "[ " << location.block << " , " << location.offset << " ]\n"
-       << " prev : "
-       << "[ " << location2.block << " , " << location2.offset << " ]\n";
+    // NEXT RANGE
+    peloton::ItemPointer nextPointer = GetNextItemPointer(header_itr);
+    os << "Next:[";
+    if (nextPointer.block == INVALID_OID) {
+      os << "INVALID_OID";
+    } else {
+      os << nextPointer.block;
+    }
+    os << ", ";
+    if (nextPointer.offset == INVALID_OID) {
+      os << "INVALID_OID";
+    } else {
+      os << nextPointer.offset;
+    }
+    os << "] ";
+
+    // PREVIOUS RANGE
+    peloton::ItemPointer prevPointer = GetPrevItemPointer(header_itr);
+    os << "Prev:[";
+    if (prevPointer.block == INVALID_OID) {
+      os << "INVALID_OID";
+    } else {
+      os << prevPointer.block;
+    }
+    os << ", ";
+    if (prevPointer.offset == INVALID_OID) {
+      os << "INVALID_OID";
+    } else {
+      os << prevPointer.offset;
+    }
+    os << "]";
   }
-
-  os << "\t-----------------------------------------------------------\n";
 
   return os.str();
 }
 
 void TileGroupHeader::Sync() {
   // Sync the tile group data
-  auto &storage_manager = storage::StorageManager::GetInstance();
-  storage_manager.Sync(backend_type, data, header_size);
+  // auto &storage_manager = storage::StorageManager::GetInstance();
+  // storage_manager.Sync(backend_type, data, header_size);
 }
 
 void TileGroupHeader::PrintVisibility(txn_id_t txn_id, cid_t at_cid) {
@@ -183,7 +226,7 @@ void TileGroupHeader::PrintVisibility(txn_id_t txn_id, cid_t at_cid) {
 
 // this function is called only when building tile groups for aggregation
 // operations.
-oid_t TileGroupHeader::GetActiveTupleCount() {
+oid_t TileGroupHeader::GetActiveTupleCount() const {
   oid_t active_tuple_slots = 0;
 
   for (oid_t tuple_slot_id = START_OID; tuple_slot_id < num_tuple_slots;
@@ -198,5 +241,5 @@ oid_t TileGroupHeader::GetActiveTupleCount() {
   return active_tuple_slots;
 }
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

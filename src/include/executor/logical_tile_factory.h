@@ -6,17 +6,15 @@
 //
 // Identification: src/include/executor/logical_tile_factory.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
 #include <vector>
-#include <memory>
 
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 

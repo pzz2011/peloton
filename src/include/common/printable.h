@@ -10,10 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <sstream>
+#include <iosfwd>
+#include <string>
 
 namespace peloton {
 

@@ -6,22 +6,17 @@
 //
 // Identification: src/include/executor/abstract_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <common/value.h>
-
+#include "common/item_pointer.h"
 #include "executor/logical_tile.h"
+#include "type/types.h"
 
 namespace peloton {
-
-//class Value;
 
 namespace planner {
 class AbstractPlan;
@@ -62,13 +57,25 @@ class AbstractExecutor {
   // in test cases.
   virtual LogicalTile *GetOutput();
 
+  // This is used to print or debug output
+  const LogicalTile *GetOutputInfo() { return output.get(); }
+
   const planner::AbstractPlan *GetRawNode() const { return node_; }
 
   // set the context
-  void SetContext(common::Value *value);
+  void SetContext(type::Value &value);
 
   // clear the context
   void ClearContext();
+
+  // Update the predicate in runtime. This is used in Nested Loop Join. Since
+  // some executor do not need this function, we set it to empty function.
+  virtual void UpdatePredicate(
+      const std::vector<oid_t> &column_ids UNUSED_ATTRIBUTE,
+      const std::vector<type::Value> &values UNUSED_ATTRIBUTE) {}
+
+  // Used to reset the state. For now it's overloaded by index scan executor
+  virtual void ResetState() {}
 
  protected:
   // NOTE: The reason why we keep the plan node separate from the executor

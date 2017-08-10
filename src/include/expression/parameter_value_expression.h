@@ -10,11 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include "expression/abstract_expression.h"
 #include "executor/executor_context.h"
+#include "common/sql_node_visitor.h"
 
 namespace peloton {
 namespace expression {
@@ -23,29 +23,33 @@ namespace expression {
 // ParameterValueExpression
 //===----------------------------------------------------------------------===//
 
-using namespace peloton::common;
-
 class ParameterValueExpression : public AbstractExpression {
  public:
   ParameterValueExpression(int value_idx)
-    : AbstractExpression(EXPRESSION_TYPE_VALUE_PARAMETER, Type::PARAMETER_OFFSET),
-      value_idx_(value_idx){}
+      : AbstractExpression(ExpressionType::VALUE_PARAMETER,
+                           type::TypeId::PARAMETER_OFFSET),
+        value_idx_(value_idx) {}
 
   int GetValueIdx() const { return value_idx_; }
 
-  std::unique_ptr<Value> Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
-      UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
-      executor::ExecutorContext *context) const override {
-    return std::unique_ptr<Value>(context->GetParams().at(value_idx_));
+  type::Value Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
+                       UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
+                       executor::ExecutorContext *context) const override {
+    return context->GetParams().at(value_idx_);
   }
 
   AbstractExpression *Copy() const override {
     return new ParameterValueExpression(value_idx_);
   }
 
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
  protected:
   int value_idx_;
+
+  ParameterValueExpression(const ParameterValueExpression &other)
+      : AbstractExpression(other), value_idx_(other.value_idx_) {}
 };
 
-}  // End expression namespace
-}  // End peloton namespace
+}  // namespace expression
+}  // namespace peloton

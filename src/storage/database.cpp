@@ -13,55 +13,76 @@
 #include <sstream>
 
 #include "catalog/foreign_key.h"
+#include "common/exception.h"
+#include "common/logger.h"
+#include "gc/gc_manager_factory.h"
+#include "index/index.h"
 #include "storage/database.h"
 #include "storage/table_factory.h"
-#include "common/logger.h"
-#include "index/index.h"
-#include "common/exception.h"
 
 namespace peloton {
 namespace storage {
 
-Database::Database(const oid_t &database_oid) : database_oid(database_oid) {}
+Database::Database(const oid_t database_oid) : database_oid(database_oid) {}
 
 Database::~Database() {
   // Clean up all the tables
   LOG_TRACE("Deleting tables from database");
-  for (auto table : tables) delete table;
+  for (auto table : tables) {
+    if (table != nullptr) delete table;
+  }
 
   LOG_TRACE("Finish deleting tables from database");
 }
 
-//===--------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 // TABLE
-//===--------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 
-void Database::AddTable(storage::DataTable *table) {
+void Database::AddTable(storage::DataTable *table, bool is_catalog) {
   {
     std::lock_guard<std::mutex> lock(database_mutex);
     tables.push_back(table);
+
+    if (is_catalog == false) {
+      // Register table to GC manager.
+      auto *gc_manager = &gc::GCManagerFactory::GetInstance();
+      assert(gc_manager != nullptr);
+      gc_manager->RegisterTable(table->GetOid());
+    }
   }
 }
 
 storage::DataTable *Database::GetTableWithOid(const oid_t table_oid) const {
-  for (auto table : tables)
-    if (table->GetOid() == table_oid) return table;
+  for (auto *table : tables) {
+    if (table->GetOid() == table_oid) {
+      return table;
+    }
+  }
+
+  // Table now found
   throw CatalogException("Table with oid = " + std::to_string(table_oid) +
                          " is not found");
   return nullptr;
 }
 
-storage::DataTable *Database::GetTableWithName(const std::string table_name)
-    const {
+storage::DataTable *Database::GetTableWithName(
+    const std::string &table_name) const {
   for (auto table : tables)
     if (table->GetName() == table_name) return table;
-  throw CatalogException("Table " + table_name + " is not found");
+  throw CatalogException("Table '" + table_name + "' does not exist");
   return nullptr;
 }
 
 void Database::DropTableWithOid(const oid_t table_oid) {
   {
     std::lock_guard<std::mutex> lock(database_mutex);
+
+    // Deregister table from GC manager.
+    auto *gc_manager = &gc::GCManagerFactory::GetInstance();
+    assert(gc_manager != nullptr);
+    gc_manager->DeregisterTable(table_oid);
+
     oid_t table_offset = 0;
     for (auto table : tables) {
       if (table->GetOid() == table_oid) {
@@ -85,9 +106,9 @@ storage::DataTable *Database::GetTable(const oid_t table_offset) const {
 
 oid_t Database::GetTableCount() const { return tables.size(); }
 
-//===--------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 // UTILITIES
-//===--------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 
 // Get a string representation for debugging
 const std::string Database::GetInfo() const {
@@ -112,12 +133,13 @@ const std::string Database::GetInfo() const {
         os << "Index Count : " << index_count << std::endl;
         for (oid_t index_itr = 0; index_itr < index_count; index_itr++) {
           auto index = table->GetIndex(index_itr);
+          if (index == nullptr) continue;
 
           switch (index->GetIndexType()) {
-            case INDEX_CONSTRAINT_TYPE_PRIMARY_KEY:
+            case IndexConstraintType::PRIMARY_KEY:
               os << "primary key index \n";
               break;
-            case INDEX_CONSTRAINT_TYPE_UNIQUE:
+            case IndexConstraintType::UNIQUE:
               os << "unique index \n";
               break;
             default:
@@ -151,11 +173,13 @@ const std::string Database::GetInfo() const {
   return os.str();
 }
 
+// deprecated, use catalog::DatabaseCatalog::GetInstance()->GetDatabaseName()
 std::string Database::GetDBName() { return database_name; }
 
+// deprecated, use catalog::DatabaseCatalog::GetInstance()->GetDatabaseName()
 void Database::setDBName(const std::string &database_name) {
   Database::database_name = database_name;
 }
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

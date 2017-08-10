@@ -10,9 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "optimizer/column.h"
-#include "catalog/column.h"
+
+#include "util/hash_util.h"
 
 namespace peloton {
 namespace optimizer {
@@ -20,13 +20,13 @@ namespace optimizer {
 //===--------------------------------------------------------------------===//
 // Column
 //===--------------------------------------------------------------------===//
-Column::Column(ColumnID id, common::Type::TypeId type, int size, std::string name,
+Column::Column(ColumnID id, type::TypeId type, int size, std::string name,
                bool inlined)
     : id(id), type(type), size(size), name(name), inlined(inlined) {}
 
 ColumnID Column::ID() const { return id; }
 
-common::Type::TypeId Column::Type() const { return type; }
+type::TypeId Column::Type() const { return type; }
 
 int Column::Size() const { return size; }
 
@@ -34,12 +34,12 @@ std::string Column::Name() const { return name; }
 
 bool Column::Inlined() const { return inlined; }
 
-hash_t Column::Hash() const { return util::Hash<ColumnID>(&id); }
+hash_t Column::Hash() const { return HashUtil::Hash<ColumnID>(&id); }
 
 //===--------------------------------------------------------------------===//
 // TableColumn
 //===--------------------------------------------------------------------===//
-TableColumn::TableColumn(ColumnID id, common::Type::TypeId type, int size,
+TableColumn::TableColumn(ColumnID id, type::TypeId type, int size,
                          std::string name, bool inlined, oid_t base_table,
                          oid_t column_index)
     : Column(id, type, size, name, inlined),
@@ -53,8 +53,8 @@ oid_t TableColumn::ColumnIndexOid() const { return column_index; }
 //===--------------------------------------------------------------------===//
 // ExprColumn
 //===--------------------------------------------------------------------===//
-ExprColumn::ExprColumn(ColumnID id, common::Type::TypeId type, int size, std::string name,
-                       bool inlined)
+ExprColumn::ExprColumn(ColumnID id, type::TypeId type, int size,
+                       std::string name, bool inlined)
     : Column(id, type, size, name, inlined) {}
 
 catalog::Column GetSchemaColumnFromOptimizerColumn(Column *column) {
@@ -62,5 +62,5 @@ catalog::Column GetSchemaColumnFromOptimizerColumn(Column *column) {
                          column->Inlined());
 }
 
-} /* namespace optimizer */
-} /* namespace peloton */
+} // namespace optimizer
+} // namespace peloton

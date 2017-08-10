@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "catalog/schema.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "planner/abstract_plan.h"
 
 namespace peloton {
@@ -27,11 +27,6 @@ namespace planner {
 
 class MaterializationPlan : public AbstractPlan {
  public:
-  MaterializationPlan(const MaterializationPlan &) = delete;
-  MaterializationPlan &operator=(const MaterializationPlan &) = delete;
-  MaterializationPlan(MaterializationPlan &&) = delete;
-  MaterializationPlan &operator=(MaterializationPlan &&) = delete;
-
   MaterializationPlan(const std::unordered_map<oid_t, oid_t> &old_to_new_cols,
                       std::shared_ptr<const catalog::Schema> &schema,
                       bool physify_flag)
@@ -51,7 +46,7 @@ class MaterializationPlan : public AbstractPlan {
   inline bool GetPhysifyFlag() const { return physify_flag_; }
 
   inline PlanNodeType GetPlanNodeType() const {
-    return PLAN_NODE_TYPE_MATERIALIZE;
+    return PlanNodeType::MATERIALIZE;
   }
 
   const std::string GetInfo() const { return "Materialize"; }
@@ -77,6 +72,9 @@ class MaterializationPlan : public AbstractPlan {
    * logical tile
    */
   bool physify_flag_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(MaterializationPlan);
 };
 
 }  // namespace planner

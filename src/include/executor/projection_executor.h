@@ -6,10 +6,9 @@
 //
 // Identification: src/include/executor/projection_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
@@ -44,7 +43,10 @@ class ProjectionExecutor : public AbstractExecutor {
 
   /** @brief Schema of projected tuples. */
   const catalog::Schema *schema_ = nullptr;
+
+  /** @brief Flag to indicate whether the execution has finished for SELECT without FROM */
+  bool finished_ = false;
 };
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

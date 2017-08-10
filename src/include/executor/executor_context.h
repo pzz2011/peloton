@@ -6,15 +6,14 @@
 //
 // Identification: src/include/executor/executor_context.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include "common/varlen_pool.h"
-#include "common/value.h"
+#include "type/ephemeral_pool.h"
+#include "type/value.h"
 
 namespace peloton {
 
@@ -40,20 +39,20 @@ class ExecutorContext {
   ExecutorContext(concurrency::Transaction *transaction);
 
   ExecutorContext(concurrency::Transaction *transaction,
-                  const std::vector<common::Value *> &params);
+                  const std::vector<type::Value> &params);
 
   ~ExecutorContext();
 
   concurrency::Transaction *GetTransaction() const;
 
-  const std::vector<common::Value *> &GetParams() const;
+  const std::vector<type::Value> &GetParams() const;
 
-  void SetParams(common::Value *value);
+  void SetParams(type::Value &value);
 
   void ClearParams();
 
-  // Get a varlen pool (will construct the pool only if needed)
-  common::VarlenPool *GetExecutorContextPool();
+  // Get a pool
+  type::EphemeralPool *GetPool();
 
   // num of tuple processed
   uint32_t num_processed = 0;
@@ -67,10 +66,10 @@ class ExecutorContext {
   concurrency::Transaction *transaction_;
 
   // params
-  std::vector<common::Value *> params_;
+  std::vector<type::Value> params_;
 
   // pool
-  std::unique_ptr<common::VarlenPool> pool_;
+  std::unique_ptr<type::EphemeralPool> pool_;
 
 };
 

@@ -10,10 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
+#include "common/sql_node_visitor.h"
 #include "expression/abstract_expression.h"
+#include "type/value.h"
+#include "util/hash_util.h"
 
 namespace peloton {
 namespace expression {
@@ -23,31 +25,53 @@ namespace expression {
 // Represents a constant value like int and string.
 //===----------------------------------------------------------------------===//
 
-using namespace peloton::common;
-
 class ConstantValueExpression : public AbstractExpression {
  public:
-  ConstantValueExpression(const Value &value)
-    : AbstractExpression(EXPRESSION_TYPE_VALUE_CONSTANT,
-                         value.GetTypeId()), value_(value.Copy()) {}
-  
-  std::unique_ptr<Value> Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
+  ConstantValueExpression(const type::Value &value)
+      : AbstractExpression(ExpressionType::VALUE_CONSTANT, value.GetTypeId()),
+        value_(value.Copy()) {}
+
+  type::Value Evaluate(
+      UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
       UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
       UNUSED_ATTRIBUTE executor::ExecutorContext *context) const override {
-    return std::unique_ptr<Value>(value_->Copy());
+    return value_;
   }
 
-  Value *GetValue() const { return value_->Copy(); }
+  virtual void DeduceExpressionName() override {
+    if (!alias.empty()) return;
+    expr_name_ = value_.ToString();
+  }
+
+  virtual bool Equals(AbstractExpression *expr) const override {
+    if (exp_type_ != expr->GetExpressionType()) return false;
+    auto const_expr = (ConstantValueExpression *)expr;
+    return value_.CompareEquals(const_expr->value_);
+  }
+
+  type::Value GetValue() const { return value_; }
 
   bool HasParameter() const override { return false; }
 
   AbstractExpression *Copy() const override {
-    return new ConstantValueExpression(*value_);
+    return new ConstantValueExpression(*this);
   }
 
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
+  virtual hash_t Hash() const override {
+    hash_t hash = HashUtil::Hash(&exp_type_);
+    return HashUtil::CombineHashes(hash, value_.Hash());
+  }
+
+  bool IsNullable() const override { return false; }
+
  protected:
-  std::unique_ptr<Value> value_;
+  ConstantValueExpression(const ConstantValueExpression &other)
+      : AbstractExpression(other), value_(other.value_) {}
+
+  type::Value value_;
 };
 
-}  // End expression namespace
-}  // End peloton namespace
+}  // namespace expression
+}  // namespace peloton

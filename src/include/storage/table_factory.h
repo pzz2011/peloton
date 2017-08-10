@@ -10,16 +10,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include "catalog/manager.h"
-#include "common/types.h"
-#include "storage/data_table.h"
-
-#include <iostream>
-#include <map>
 #include <string>
+
+#include "catalog/manager.h"
+#include "type/types.h"
+#include "storage/data_table.h"
+#include "storage/temp_table.h"
 
 namespace peloton {
 namespace storage {
@@ -32,11 +30,13 @@ class TableFactory {
   /**
    * For a given Schema, instantiate a DataTable object and return it
    */
-  static DataTable *GetDataTable(oid_t database_id, oid_t relation_id,
+  static DataTable *GetDataTable(oid_t database_id, oid_t table_id,
                                  catalog::Schema *schema,
                                  std::string table_name,
                                  size_t tuples_per_tile_group_count,
-                                 bool own_schema, bool adapt_table);
+                                 bool own_schema, bool adapt_table, bool is_catalog = false);
+
+  static TempTable *GetTempTable(catalog::Schema *schema, bool own_schema);
 
   /**
    * For a given table name, drop the table from database
@@ -44,5 +44,5 @@ class TableFactory {
   static bool DropDataTable(oid_t database_oid, oid_t table_oid);
 };
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

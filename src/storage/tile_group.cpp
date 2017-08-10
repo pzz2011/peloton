@@ -14,15 +14,15 @@
 
 #include <numeric>
 
-#include "common/platform.h"
 #include "catalog/manager.h"
+#include "common/container_tuple.h"
 #include "common/logger.h"
-#include "common/types.h"
+#include "common/platform.h"
+#include "type/types.h"
 #include "storage/abstract_table.h"
 #include "storage/tile.h"
-#include "storage/tuple.h"
 #include "storage/tile_group_header.h"
-#include "expression/container_tuple.h"
+#include "storage/tuple.h"
 
 namespace peloton {
 namespace storage {
@@ -67,7 +67,7 @@ oid_t TileGroup::GetTileId(const oid_t tile_id) const {
   return tiles[tile_id]->GetTileId();
 }
 
-common::VarlenPool *TileGroup::GetTilePool(const oid_t tile_id) const {
+type::AbstractPool *TileGroup::GetTilePool(const oid_t tile_id) const {
   Tile *tile = GetTile(tile_id);
 
   if (tile != nullptr) {
@@ -75,6 +75,10 @@ common::VarlenPool *TileGroup::GetTilePool(const oid_t tile_id) const {
   }
 
   return nullptr;
+}
+
+oid_t TileGroup::GetTileGroupId() const {
+  return tile_group_id;
 }
 
 // TODO: check when this function is called. --Yingjun
@@ -116,24 +120,10 @@ void TileGroup::CopyTuple(const Tuple *tuple, const oid_t &tuple_slot_id) {
 
     for (oid_t tile_column_itr = 0; tile_column_itr < tile_column_count;
          tile_column_itr++) {
-      std::unique_ptr<common::Value> val(tuple->GetValue(column_itr));
-      tile_tuple.SetValue(tile_column_itr, *val, tile->GetPool());
+      type::Value val = (tuple->GetValue(column_itr));
+      tile_tuple.SetValue(tile_column_itr, val, tile->GetPool());
       column_itr++;
     }
-  }
-}
-
-// This is commented out before merge
-void TileGroup::CopyTuple(const oid_t &tuple_slot_id, Tuple *tuple) {
-  LOG_TRACE("Tile Group Id :: %u status :: %u out of %u slots ", tile_group_id,
-            tuple_slot_id, num_tuple_slots);
-  auto schema = table->GetSchema();
-
-  PL_ASSERT(tuple->GetColumnCount() == schema->GetColumnCount());
-
-  for (oid_t col_id = 0; col_id < schema->GetColumnCount(); ++col_id) {
-    std::unique_ptr<common::Value> val(GetValue(tuple_slot_id, col_id));
-    tuple->SetValue(col_id, *val, nullptr);
   }
 }
 
@@ -154,7 +144,8 @@ oid_t TileGroup::InsertTuple(const Tuple *tuple) {
     return INVALID_OID;
   }
 
-  // if the input tuple is nullptr, then it means that the tuple with be filled in
+  // if the input tuple is nullptr, then it means that the tuple with be filled
+  // in
   // outside the function. directly return the empty slot.
   if (tuple == nullptr) {
     return tuple_slot_id;
@@ -164,7 +155,8 @@ oid_t TileGroup::InsertTuple(const Tuple *tuple) {
   CopyTuple(tuple, tuple_slot_id);
 
   // Set MVCC info
-  PL_ASSERT(tile_group_header->GetTransactionId(tuple_slot_id) == INVALID_TXN_ID);
+  PL_ASSERT(tile_group_header->GetTransactionId(tuple_slot_id) ==
+            INVALID_TXN_ID);
   PL_ASSERT(tile_group_header->GetBeginCommitId(tuple_slot_id) == MAX_CID);
   PL_ASSERT(tile_group_header->GetEndCommitId(tuple_slot_id) == MAX_CID);
 
@@ -211,8 +203,8 @@ oid_t TileGroup::InsertTupleFromRecovery(cid_t commit_id, oid_t tuple_slot_id,
 
     for (oid_t tile_column_itr = 0; tile_column_itr < tile_column_count;
          tile_column_itr++) {
-      std::unique_ptr<common::Value> val(tuple->GetValue(column_itr));
-      tile_tuple.SetValue(tile_column_itr, *val, tile->GetPool());
+      type::Value val = (tuple->GetValue(column_itr));
+      tile_tuple.SetValue(tile_column_itr, val, tile->GetPool());
       column_itr++;
     }
   }
@@ -311,8 +303,8 @@ oid_t TileGroup::InsertTupleFromCheckpoint(oid_t tuple_slot_id,
 
     for (oid_t tile_column_itr = 0; tile_column_itr < tile_column_count;
          tile_column_itr++) {
-      std::unique_ptr<common::Value> val(tuple->GetValue(column_itr));
-      tile_tuple.SetValue(tile_column_itr, *val, tile->GetPool());
+      type::Value val = (tuple->GetValue(column_itr));
+      tile_tuple.SetValue(tile_column_itr, val, tile->GetPool());
       column_itr++;
     }
   }
@@ -324,18 +316,6 @@ oid_t TileGroup::InsertTupleFromCheckpoint(oid_t tuple_slot_id,
   tile_group_header->SetNextItemPointer(tuple_slot_id, INVALID_ITEMPOINTER);
 
   return tuple_slot_id;
-}
-
-// Sets the tile id and column id w.r.t that tile corresponding to
-// the specified tile group column id.
-void TileGroup::LocateTileAndColumn(oid_t column_offset, oid_t &tile_offset,
-                                    oid_t &tile_column_offset) {
-  PL_ASSERT(column_map.count(column_offset) != 0);
-
-  // get the entry in the column map
-  auto entry = column_map.at(column_offset);
-  tile_offset = entry.first;
-  tile_column_offset = entry.second;
 }
 
 oid_t TileGroup::GetTileIdFromColumnId(oid_t column_id) {
@@ -350,14 +330,15 @@ oid_t TileGroup::GetTileColumnId(oid_t column_id) {
   return tile_column_id;
 }
 
-common::Value *TileGroup::GetValue(oid_t tuple_id, oid_t column_id) {
+type::Value TileGroup::GetValue(oid_t tuple_id, oid_t column_id) {
   PL_ASSERT(tuple_id < GetNextTupleSlot());
   oid_t tile_column_id, tile_offset;
   LocateTileAndColumn(column_id, tile_offset, tile_column_id);
   return GetTile(tile_offset)->GetValue(tuple_id, tile_column_id);
 }
 
-void TileGroup::SetValue(common::Value &value, oid_t tuple_id, oid_t column_id) {
+void TileGroup::SetValue(type::Value &value, oid_t tuple_id,
+                         oid_t column_id) {
   PL_ASSERT(tuple_id < GetNextTupleSlot());
   oid_t tile_column_id, tile_offset;
   LocateTileAndColumn(column_id, tile_offset, tile_column_id);
@@ -365,14 +346,8 @@ void TileGroup::SetValue(common::Value &value, oid_t tuple_id, oid_t column_id) 
 }
 
 
-Tile *TileGroup::GetTile(const oid_t tile_offset) const {
-  PL_ASSERT(tile_offset < tile_count);
-  Tile *tile = tiles[tile_offset].get();
-  return tile;
-}
-
-std::shared_ptr<Tile> TileGroup::GetTileReference(const oid_t tile_offset)
-    const {
+std::shared_ptr<Tile> TileGroup::GetTileReference(
+    const oid_t tile_offset) const {
   PL_ASSERT(tile_offset < tile_count);
   return tiles[tile_offset];
 }
@@ -411,27 +386,23 @@ void TileGroup::Sync() {
 const std::string TileGroup::GetInfo() const {
   std::ostringstream os;
 
-  os << "=============================================================\n";
-
-  os << "TILE GROUP :\n";
-  os << "\tCatalog ::"
-     << " DB: " << database_id << " Table: " << table_id
-     << " Tile Group:  " << tile_group_id << "\n";
-
-  os << " TILE GROUP HEADER :: " << tile_group_header;
+  os << "** TILE GROUP[#" << tile_group_id << "] **" << std::endl;
+  os << "Database[" << database_id << "] // ";
+  os << "Table[" << table_id << "] " << std::endl;
+  os << (*tile_group_header) << std::endl;
 
   for (oid_t tile_itr = 0; tile_itr < tile_count; tile_itr++) {
     Tile *tile = GetTile(tile_itr);
-    if (tile != nullptr) os << (*tile);
+    if (tile != nullptr) {
+      os << std::endl << (*tile);
+    }
   }
 
-  auto header = GetHeader();
-  if (header != nullptr) os << (*header);
+  // auto header = GetHeader();
+  // if (header != nullptr) os << (*header);
 
-  os << "=============================================================\n";
-
-  return os.str().c_str();
+  return os.str();
 }
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

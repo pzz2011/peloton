@@ -12,7 +12,7 @@
 
 #pragma once
 
-#include "common/types.h"
+#include "type/types.h"
 #include "gmock/gmock.h"
 #include "planner/abstract_plan.h"
 
@@ -31,7 +31,7 @@ class MockPlan : public planner::AbstractPlan {
   // Accessors
   //===--------------------------------------------------------------------===//
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_MOCK; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::MOCK; }
 
   //===--------------------------------------------------------------------===//
   // Utilities

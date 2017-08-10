@@ -15,25 +15,24 @@
 
 #include "brain/clusterer.h"
 #include "brain/sample.h"
+#include "catalog/foreign_key.h"
 #include "common/exception.h"
 #include "common/logger.h"
 #include "common/platform.h"
-#include "common/exception.h"
-#include "catalog/foreign_key.h"
-#include "catalog/catalog.h"
-#include "concurrency/transaction_manager_factory.h"
 #include "concurrency/transaction.h"
+#include "concurrency/transaction_manager_factory.h"
 #include "gc/gc_manager_factory.h"
 #include "index/index.h"
 #include "logging/log_manager.h"
-#include "storage/tile_group.h"
-#include "storage/tuple.h"
-#include "storage/tile.h"
-#include "storage/tile_group_header.h"
-#include "storage/tile_group_factory.h"
 #include "storage/abstract_table.h"
-#include "storage/database.h"
 #include "storage/data_table.h"
+#include "storage/database.h"
+#include "storage/storage_manager.h"
+#include "storage/tile.h"
+#include "storage/tile_group.h"
+#include "storage/tile_group_factory.h"
+#include "storage/tile_group_header.h"
+#include "storage/tuple.h"
 
 //===--------------------------------------------------------------------===//
 // Configuration Variables
@@ -50,14 +49,16 @@ namespace storage {
 
 oid_t DataTable::invalid_tile_group_id = -1;
 
-size_t DataTable::active_tilegroup_count_ = 1;
-size_t DataTable::active_indirection_array_count_ = 1;
+size_t DataTable::default_active_tilegroup_count_ = 1;
+size_t DataTable::default_active_indirection_array_count_ = 1;
 
 DataTable::DataTable(catalog::Schema *schema, const std::string &table_name,
                      const oid_t &database_oid, const oid_t &table_oid,
                      const size_t &tuples_per_tilegroup, const bool own_schema,
-                     const bool adapt_table)
-    : AbstractTable(database_oid, table_oid, table_name, schema, own_schema),
+                     const bool adapt_table, const bool is_catalog)
+    : AbstractTable(table_oid, schema, own_schema),
+      database_oid(database_oid),
+      table_name(table_name),
       tuples_per_tilegroup_(tuples_per_tilegroup),
       adapt_table_(adapt_table) {
   // Init default partition
@@ -66,11 +67,17 @@ DataTable::DataTable(catalog::Schema *schema, const std::string &table_name,
     default_partition_[col_itr] = std::make_pair(0, col_itr);
   }
 
+  if (is_catalog == true) {
+    active_tilegroup_count_ = 1;
+    active_indirection_array_count_ = 1;
+  } else {
+    active_tilegroup_count_ = default_active_tilegroup_count_;
+    active_indirection_array_count_ = default_active_indirection_array_count_;
+  }
+
   active_tile_groups_.resize(active_tilegroup_count_);
 
   active_indirection_arrays_.resize(active_indirection_array_count_);
-
-
   // Create tile groups.
   for (size_t i = 0; i < active_tilegroup_count_; ++i) {
     AddDefaultTileGroup(i);
@@ -83,7 +90,6 @@ DataTable::DataTable(catalog::Schema *schema, const std::string &table_name,
 }
 
 DataTable::~DataTable() {
-
   // clean up tile groups by dropping the references in the catalog
   auto &catalog_manager = catalog::Manager::GetInstance();
   auto tile_groups_size = tile_groups_.GetSize();
@@ -103,6 +109,12 @@ DataTable::~DataTable() {
   // clean up foreign keys
   for (auto foreign_key : foreign_keys_) {
     delete foreign_key;
+  }
+
+  // drop all indirection arrays
+  for (auto indirection_array : active_indirection_arrays_) {
+    auto oid = indirection_array->GetOid();
+    catalog_manager.DropIndirectionArray(oid);
   }
 
   // AbstractTable cleans up the schema
@@ -148,13 +160,24 @@ bool DataTable::CheckConstraints(const storage::Tuple *tuple) const {
 // new tile group.
 // we just wait until a new tuple slot in the newly allocated tile group is
 // available.
+// when updating a tuple, we will invoke this function with the argument set to
+// nullptr.
+// this is because we want to minimize data copy overhead by performing
+// in-place update at executor level.
+// however, when performing insert, we have to copy data immediately,
+// and the argument cannot be set to nullptr.
 ItemPointer DataTable::GetEmptyTupleSlot(const storage::Tuple *tuple) {
-
   //=============== garbage collection==================
   // check if there are recycled tuple slots
   auto &gc_manager = gc::GCManagerFactory::GetInstance();
   auto free_item_pointer = gc_manager.ReturnFreeSlot(this->table_oid);
   if (free_item_pointer.IsNull() == false) {
+    // when inserting a tuple
+    if (tuple != nullptr) {
+      auto tile_group =
+          catalog::Manager::GetInstance().GetTileGroup(free_item_pointer.block);
+      tile_group->CopyTuple(tuple, free_item_pointer.offset);
+    }
     return free_item_pointer;
   }
   //====================================================
@@ -227,10 +250,11 @@ ItemPointer DataTable::AcquireVersion() {
 
 bool DataTable::InstallVersion(const AbstractTuple *tuple,
                                const TargetList *targets_ptr,
+                               concurrency::Transaction *transaction,
                                ItemPointer *index_entry_ptr) {
-
   // Index checks and updates
-  if (InsertInSecondaryIndexes(tuple, targets_ptr, index_entry_ptr) == false) {
+  if (InsertInSecondaryIndexes(tuple, targets_ptr, transaction,
+                               index_entry_ptr) == false) {
     LOG_TRACE("Index constraint violated");
     return false;
   }
@@ -286,7 +310,6 @@ ItemPointer DataTable::InsertTuple(const storage::Tuple *tuple,
 
 // insert tuple into a table that is without index.
 ItemPointer DataTable::InsertTuple(const storage::Tuple *tuple) {
-
   ItemPointer location = GetEmptyTupleSlot(tuple);
   if (location.block == INVALID_OID) {
     LOG_TRACE("Failed to get tuple slot.");
@@ -315,19 +338,21 @@ bool DataTable::InsertInIndexes(const storage::Tuple *tuple,
                                 ItemPointer location,
                                 concurrency::Transaction *transaction,
                                 ItemPointer **index_entry_ptr) {
-
   int index_count = GetIndexCount();
 
-  size_t active_indirection_array_id = number_of_tuples_ % active_indirection_array_count_;
+  size_t active_indirection_array_id =
+      number_of_tuples_ % active_indirection_array_count_;
 
   size_t indirection_offset = INVALID_INDIRECTION_OFFSET;
-  
+
   while (true) {
-    auto active_indirection_array = active_indirection_arrays_[active_indirection_array_id];
+    auto active_indirection_array =
+        active_indirection_arrays_[active_indirection_array_id];
     indirection_offset = active_indirection_array->AllocateIndirection();
 
     if (indirection_offset != INVALID_INDIRECTION_OFFSET) {
-      *index_entry_ptr = active_indirection_array->GetIndirectionByOffset(indirection_offset);
+      *index_entry_ptr =
+          active_indirection_array->GetIndirectionByOffset(indirection_offset);
       break;
     }
   }
@@ -352,21 +377,22 @@ bool DataTable::InsertInIndexes(const storage::Tuple *tuple,
 
   for (int index_itr = index_count - 1; index_itr >= 0; --index_itr) {
     auto index = GetIndex(index_itr);
+    if (index == nullptr) continue;
     auto index_schema = index->GetKeySchema();
     auto indexed_columns = index_schema->GetIndexedColumns();
     std::unique_ptr<storage::Tuple> key(new storage::Tuple(index_schema, true));
     key->SetFromTuple(tuple, indexed_columns, index->GetPool());
 
     switch (index->GetIndexType()) {
-      case INDEX_CONSTRAINT_TYPE_PRIMARY_KEY: 
-      case INDEX_CONSTRAINT_TYPE_UNIQUE: {
+      case IndexConstraintType::PRIMARY_KEY:
+      case IndexConstraintType::UNIQUE: {
         // get unique tuple from primary/unique index.
         // if in this index there has been a visible or uncommitted
         // <key, location> pair, this constraint is violated
         res = index->CondInsertEntry(key.get(), *index_entry_ptr, fn);
       } break;
 
-      case INDEX_CONSTRAINT_TYPE_DEFAULT:
+      case IndexConstraintType::DEFAULT:
       default:
         index->InsertEntry(key.get(), *index_entry_ptr);
         break;
@@ -375,7 +401,8 @@ bool DataTable::InsertInIndexes(const storage::Tuple *tuple,
     // Handle failure
     if (res == false) {
       // If some of the indexes have been inserted,
-      // the pointer has a chance to be dereferenced by readers and it cannot be deleted
+      // the pointer has a chance to be dereferenced by readers and it cannot be
+      // deleted
       *index_entry_ptr = nullptr;
       return false;
     } else {
@@ -389,9 +416,10 @@ bool DataTable::InsertInIndexes(const storage::Tuple *tuple,
 
 bool DataTable::InsertInSecondaryIndexes(const AbstractTuple *tuple,
                                          const TargetList *targets_ptr,
+                                         concurrency::Transaction *transaction,
                                          ItemPointer *index_entry_ptr) {
   int index_count = GetIndexCount();
-  // Transaform the target list into a hash set
+  // Transform the target list into a hash set
   // when attempting to perform insertion to a secondary index,
   // we must check whether the updated column is a secondary index column.
   // insertion happens only if the updated column is a secondary index column.
@@ -400,14 +428,24 @@ bool DataTable::InsertInSecondaryIndexes(const AbstractTuple *tuple,
     targets_set.insert(target.first);
   }
 
+  bool res = true;
+
+  auto &transaction_manager =
+      concurrency::TransactionManagerFactory::GetInstance();
+
+  std::function<bool(const void *)> fn =
+      std::bind(&concurrency::TransactionManager::IsOccupied,
+                &transaction_manager, transaction, std::placeholders::_1);
+
   // Check existence for primary/unique indexes
   // Since this is NOT protected by a lock, concurrent insert may happen.
   for (int index_itr = index_count - 1; index_itr >= 0; --index_itr) {
     auto index = GetIndex(index_itr);
+    if (index == nullptr) continue;
     auto index_schema = index->GetKeySchema();
     auto indexed_columns = index_schema->GetIndexedColumns();
 
-    if (index->GetIndexType() == INDEX_CONSTRAINT_TYPE_PRIMARY_KEY) {
+    if (index->GetIndexType() == IndexConstraintType::PRIMARY_KEY) {
       continue;
     }
 
@@ -431,18 +469,18 @@ bool DataTable::InsertInSecondaryIndexes(const AbstractTuple *tuple,
     key->SetFromTuple(tuple, indexed_columns, index->GetPool());
 
     switch (index->GetIndexType()) {
-      case INDEX_CONSTRAINT_TYPE_PRIMARY_KEY:
-        break;
-      case INDEX_CONSTRAINT_TYPE_UNIQUE:
-        break;
-      case INDEX_CONSTRAINT_TYPE_DEFAULT:
+      case IndexConstraintType::PRIMARY_KEY:
+      case IndexConstraintType::UNIQUE: {
+        res = index->CondInsertEntry(key.get(), index_entry_ptr, fn);
+      } break;
+      case IndexConstraintType::DEFAULT:
       default:
         index->InsertEntry(key.get(), index_entry_ptr);
         break;
     }
     LOG_TRACE("Index constraint check on %s passed.", index->GetName().c_str());
   }
-  return true;
+  return res;
 }
 
 /**
@@ -462,18 +500,23 @@ bool DataTable::CheckForeignKeyConstraints(const storage::Tuple *tuple
                                                UNUSED_ATTRIBUTE) {
   for (auto foreign_key : foreign_keys_) {
     oid_t sink_table_id = foreign_key->GetSinkTableOid();
-    storage::DataTable *ref_table =
-        (storage::DataTable *)catalog::Catalog::GetInstance()->GetTableWithOid(
-            database_oid, sink_table_id);
-
+    storage::DataTable *ref_table = nullptr;
+    try{
+        ref_table = (storage::DataTable *)storage::StorageManager::GetInstance()
+            ->GetTableWithOid(database_oid, sink_table_id);
+    } catch (CatalogException &e) {
+        LOG_TRACE("Can't find table %d! Return false", sink_table_id);
+        return false;
+    }
     int ref_table_index_count = ref_table->GetIndexCount();
 
     for (int index_itr = ref_table_index_count - 1; index_itr >= 0;
          --index_itr) {
       auto index = ref_table->GetIndex(index_itr);
+      if (index == nullptr) continue;
 
       // The foreign key constraints only refer to the primary key
-      if (index->GetIndexType() == INDEX_CONSTRAINT_TYPE_PRIMARY_KEY) {
+      if (index->GetIndexType() == IndexConstraintType::PRIMARY_KEY) {
         LOG_TRACE("BEGIN checking referred table");
         auto key_attrs = foreign_key->GetFKColumnOffsets();
 
@@ -556,71 +599,18 @@ void DataTable::ResetDirty() { dirty_ = false; }
 
 TileGroup *DataTable::GetTileGroupWithLayout(
     const column_map_type &partitioning) {
-  std::vector<catalog::Schema> schemas;
-  oid_t tile_group_id = INVALID_OID;
-
-  tile_group_id = catalog::Manager::GetInstance().GetNextTileGroupId();
-
-  // Figure out the columns in each tile in new layout
-  std::map<std::pair<oid_t, oid_t>, oid_t> tile_column_map;
-  for (auto entry : partitioning) {
-    tile_column_map[entry.second] = entry.first;
-  }
-
-  // Build the schema tile at a time
-  std::map<oid_t, std::vector<catalog::Column>> tile_schemas;
-  for (auto entry : tile_column_map) {
-    tile_schemas[entry.first.first].push_back(schema->GetColumn(entry.second));
-  }
-  for (auto entry : tile_schemas) {
-    catalog::Schema tile_schema(entry.second);
-    schemas.push_back(tile_schema);
-  }
-
-  TileGroup *tile_group = TileGroupFactory::GetTileGroup(
-      database_oid, table_oid, tile_group_id, this, schemas, partitioning,
-      tuples_per_tilegroup_);
-
-  return tile_group;
+  oid_t tile_group_id = catalog::Manager::GetInstance().GetNextTileGroupId();
+  return (AbstractTable::GetTileGroupWithLayout(
+      database_oid, tile_group_id, partitioning, tuples_per_tilegroup_));
 }
 
-column_map_type DataTable::GetTileGroupLayout(LayoutType layout_type) {
-  column_map_type column_map;
-
-  auto col_count = schema->GetColumnCount();
-
-  // pure row layout map
-  if (layout_type == LAYOUT_TYPE_ROW) {
-    for (oid_t col_itr = 0; col_itr < col_count; col_itr++) {
-      column_map[col_itr] = std::make_pair(0, col_itr);
-    }
-  }
-  // pure column layout map
-  else if (layout_type == LAYOUT_TYPE_COLUMN) {
-    for (oid_t col_itr = 0; col_itr < col_count; col_itr++) {
-      column_map[col_itr] = std::make_pair(col_itr, 0);
-    }
-  }
-  // hybrid layout map
-  else if (layout_type == LAYOUT_TYPE_HYBRID) {
-    for (oid_t col_itr = 0; col_itr < col_count; col_itr++) {
-      column_map[col_itr] = std::make_pair(0, col_itr);
-    }
-  } else {
-    throw Exception("Unknown tilegroup layout option : " +
-                    std::to_string(layout_type));
-  }
-
-  return column_map;
-}
-
-
-oid_t DataTable::AddDefaultIndirectionArray(const size_t &active_indirection_array_id) {
-  std::shared_ptr<IndirectionArray> indirection_array(new IndirectionArray());
-
+oid_t DataTable::AddDefaultIndirectionArray(
+    const size_t &active_indirection_array_id) {
   auto &manager = catalog::Manager::GetInstance();
-
   oid_t indirection_array_id = manager.GetNextIndirectionArrayId();
+
+  std::shared_ptr<IndirectionArray> indirection_array(
+      new IndirectionArray(indirection_array_id));
   manager.AddIndirectionArray(indirection_array_id, indirection_array);
 
   COMPILER_MEMORY_FENCE;
@@ -649,12 +639,11 @@ oid_t DataTable::AddDefaultTileGroup(const size_t &active_tile_group_id) {
   tile_group_id = tile_group->GetTileGroupId();
 
   LOG_TRACE("Added a tile group ");
-
   tile_groups_.Append(tile_group_id);
 
   // add tile group metadata in locator
   catalog::Manager::GetInstance().AddTileGroup(tile_group_id, tile_group);
-  
+
   COMPILER_MEMORY_FENCE;
 
   active_tile_groups_[active_tile_group_id] = tile_group;
@@ -690,7 +679,6 @@ void DataTable::AddTileGroupWithOidForRecovery(const oid_t &tile_group_id) {
   auto tile_groups_exists = tile_groups_.Contains(tile_group_id);
 
   if (tile_groups_exists == false) {
-
     tile_groups_.Append(tile_group_id);
 
     LOG_TRACE("Added a tile group ");
@@ -710,7 +698,6 @@ void DataTable::AddTileGroupWithOidForRecovery(const oid_t &tile_group_id) {
 
 // NOTE: This function is only used in test cases.
 void DataTable::AddTileGroup(const std::shared_ptr<TileGroup> &tile_group) {
-
   size_t active_tile_group_id = number_of_tuples_ % active_tilegroup_count_;
 
   active_tile_groups_[active_tile_group_id] = tile_group;
@@ -750,7 +737,6 @@ std::shared_ptr<storage::TileGroup> DataTable::GetTileGroupById(
 }
 
 void DataTable::DropTileGroups() {
-
   auto &catalog_manager = catalog::Manager::GetInstance();
   auto tile_groups_size = tile_groups_.GetSize();
   std::size_t tile_groups_itr;
@@ -771,37 +757,6 @@ void DataTable::DropTileGroups() {
   tile_group_count_ = 0;
 }
 
-const std::string DataTable::GetInfo() const {
-  std::ostringstream os;
-
-  // os << "=====================================================\n";
-  // os << "TABLE :\n";
-
-  oid_t tile_group_count = GetTileGroupCount();
-  // os << "Tile Group Count : " << tile_group_count << "\n";
-
-  oid_t tuple_count = 0;
-  oid_t table_id = 0;
-  for (oid_t tile_group_itr = 0; tile_group_itr < tile_group_count;
-       tile_group_itr++) {
-    auto tile_group = GetTileGroup(tile_group_itr);
-    table_id = tile_group->GetTableId();
-    auto tile_tuple_count = tile_group->GetNextTupleSlot();
-
-    // os << "Tile Group Id  : " << tile_group_itr
-    //    << " Tuple Count : " << tile_tuple_count << "\n";
-    // os << (*tile_group);
-
-    tuple_count += tile_tuple_count;
-  }
-
-  os << "Table " << table_id << " Tuple Count :: " << tuple_count << "\n";
-
-  // os << "=====================================================\n";
-
-  return os.str();
-}
-
 //===--------------------------------------------------------------------===//
 // INDEX
 //===--------------------------------------------------------------------===//
@@ -819,22 +774,21 @@ void DataTable::AddIndex(std::shared_ptr<index::Index> index) {
 
   // Update index stats
   auto index_type = index->GetIndexType();
-  if (index_type == INDEX_CONSTRAINT_TYPE_PRIMARY_KEY) {
+  if (index_type == IndexConstraintType::PRIMARY_KEY) {
     has_primary_key_ = true;
-  } else if (index_type == INDEX_CONSTRAINT_TYPE_UNIQUE) {
+  } else if (index_type == IndexConstraintType::UNIQUE) {
     unique_constraint_count_++;
   }
 }
 
 std::shared_ptr<index::Index> DataTable::GetIndexWithOid(
     const oid_t &index_oid) {
-
   std::shared_ptr<index::Index> ret_index;
   auto index_count = indexes_.GetSize();
 
   for (std::size_t index_itr = 0; index_itr < index_count; index_itr++) {
     ret_index = indexes_.Find(index_itr);
-    if (ret_index->GetOid() == index_oid) {
+    if (ret_index != nullptr && ret_index->GetOid() == index_oid) {
       break;
     }
   }
@@ -852,7 +806,7 @@ void DataTable::DropIndexWithOid(const oid_t &index_oid) {
 
   for (std::size_t index_itr = 0; index_itr < index_count; index_itr++) {
     index = indexes_.Find(index_itr);
-    if (index->GetOid() == index_oid) {
+    if (index != nullptr && index->GetOid() == index_oid) {
       break;
     }
   }
@@ -863,20 +817,33 @@ void DataTable::DropIndexWithOid(const oid_t &index_oid) {
   indexes_.Update(index_offset, nullptr);
 
   // Drop index column info
-  indexes_columns_.erase(indexes_columns_.begin() + index_offset);
+  indexes_columns_[index_offset].clear();
 }
 
-std::shared_ptr<index::Index> DataTable::GetIndex(const oid_t &index_offset) {
+void DataTable::DropIndexes() {
+  // TODO: iterate over all indexes, and actually drop them
 
+  indexes_.Clear(nullptr);
+
+  indexes_columns_.clear();
+}
+
+// This is a dangerous function, use GetIndexWithOid() instead. Note
+// that the returned index could be a nullptr once we can drop index
+// with oid (due to a limitation of LockFreeArray).
+std::shared_ptr<index::Index> DataTable::GetIndex(const oid_t &index_offset) {
   PL_ASSERT(index_offset < indexes_.GetSize());
   auto ret_index = indexes_.Find(index_offset);
 
   return ret_index;
 }
 
+//
 std::set<oid_t> DataTable::GetIndexAttrs(const oid_t &index_offset) const {
-  PL_ASSERT(index_offset < indexes_columns_.size());
+  PL_ASSERT(index_offset < GetIndexCount());
+
   auto index_attrs = indexes_columns_.at(index_offset);
+
   return index_attrs;
 }
 
@@ -884,6 +851,23 @@ oid_t DataTable::GetIndexCount() const {
   size_t index_count = indexes_.GetSize();
 
   return index_count;
+}
+
+oid_t DataTable::GetValidIndexCount() const {
+  std::shared_ptr<index::Index> index;
+  auto index_count = indexes_.GetSize();
+  oid_t valid_index_count = 0;
+
+  for (std::size_t index_itr = 0; index_itr < index_count; index_itr++) {
+    index = indexes_.Find(index_itr);
+    if (index == nullptr) {
+      continue;
+    }
+
+    valid_index_count++;
+  }
+
+  return valid_index_count;
 }
 
 //===--------------------------------------------------------------------===//
@@ -894,7 +878,7 @@ void DataTable::AddForeignKey(catalog::ForeignKey *key) {
   {
     std::lock_guard<std::mutex> lock(data_table_mutex_);
     catalog::Schema *schema = this->GetSchema();
-    catalog::Constraint constraint(CONSTRAINT_TYPE_FOREIGN,
+    catalog::Constraint constraint(ConstraintType::FOREIGN,
                                    key->GetConstraintName());
     constraint.SetForeignKeyListOffset(GetForeignKeyCount());
     for (auto fk_column : key->GetFKColumnNames()) {
@@ -986,9 +970,9 @@ void SetTransformedTileGroup(storage::TileGroup *orig_tile_group,
 
     // Copy the column over to the new tile group
     for (oid_t tuple_itr = 0; tuple_itr < tuple_count; tuple_itr++) {
-      std::unique_ptr<common::Value> val(
-        orig_tile->GetValue(tuple_itr, orig_tile_column_offset));
-      new_tile->SetValue(*val, tuple_itr, new_tile_column_offset);
+      type::Value val =
+          (orig_tile->GetValue(tuple_itr, orig_tile_column_offset));
+      new_tile->SetValue(val, tuple_itr, new_tile_column_offset);
     }
   }
 
@@ -1051,8 +1035,11 @@ void DataTable::RecordLayoutSample(const brain::Sample &sample) {
   }
 }
 
-const std::vector<brain::Sample> &DataTable::GetLayoutSamples() const {
-  return layout_samples_;
+std::vector<brain::Sample> DataTable::GetLayoutSamples() {
+  {
+    std::lock_guard<std::mutex> lock(layout_samples_mutex_);
+    return layout_samples_;
+  }
 }
 
 void DataTable::ClearLayoutSamples() {
@@ -1071,8 +1058,11 @@ void DataTable::RecordIndexSample(const brain::Sample &sample) {
   }
 }
 
-const std::vector<brain::Sample> &DataTable::GetIndexSamples() const {
-  return index_samples_;
+std::vector<brain::Sample> DataTable::GetIndexSamples() {
+  {
+    std::lock_guard<std::mutex> lock(index_samples_mutex_);
+    return index_samples_;
+  }
 }
 
 void DataTable::ClearIndexSamples() {
@@ -1096,12 +1086,16 @@ std::map<oid_t, oid_t> DataTable::GetColumnMapStats() {
       column_map_stats[tile_id]++;
   }
 
-  return std::move(column_map_stats);
+  return column_map_stats;
 }
 
 void DataTable::SetDefaultLayout(const column_map_type &layout) {
   default_partition_ = layout;
 }
 
-}  // End storage namespace
-}  // End peloton namespace
+column_map_type DataTable::GetDefaultLayout() const {
+  return default_partition_;
+}
+
+}  // namespace storage
+}  // namespace peloton

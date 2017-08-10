@@ -10,33 +10,34 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "statistics/backend_stats_context.h"
+
 #include <map>
 
-#include "common/types.h"
+#include "type/types.h"
+#include "common/statement.h"
 #include "catalog/catalog.h"
+#include "catalog/manager.h"
 #include "index/index.h"
-#include "statistics/backend_stats_context.h"
 #include "statistics/stats_aggregator.h"
-#include "statistics/counter_metric.h"
-#include "storage/database.h"
+#include "storage/storage_manager.h"
 #include "storage/tile_group.h"
 
 namespace peloton {
 namespace stats {
 
-CuckooMap<std::thread::id, std::shared_ptr<BackendStatsContext>> &
-  BackendStatsContext::GetBackendContextMap() {
+CuckooMap<std::thread::id, std::shared_ptr<BackendStatsContext>>&
+BackendStatsContext::GetBackendContextMap() {
   static CuckooMap<std::thread::id, std::shared_ptr<BackendStatsContext>>
       stats_context_map;
   return stats_context_map;
 }
 
 BackendStatsContext* BackendStatsContext::GetInstance() {
-
   // Each thread gets a backend stats context
   std::thread::id this_id = std::this_thread::get_id();
   std::shared_ptr<BackendStatsContext> result(nullptr);
-  auto &stats_context_map = GetBackendContextMap();
+  auto& stats_context_map = GetBackendContextMap();
   if (stats_context_map.Find(this_id, result) == false) {
     result.reset(new BackendStatsContext(LATENCY_MAX_HISTORY_THREAD, true));
     stats_context_map.Insert(this_id, result);
@@ -88,12 +89,17 @@ IndexMetric* BackendStatsContext::GetIndexMetric(oid_t database_id,
                                                  oid_t table_id,
                                                  oid_t index_id) {
   std::shared_ptr<IndexMetric> index_metric;
-  if (index_metrics_.Find(index_id, index_metric) == false) {
+  // Index metric doesn't exist yet
+  if (index_metrics_.Contains(index_id) == false) {
     index_metric.reset(
         new IndexMetric{INDEX_METRIC, database_id, table_id, index_id});
     index_metrics_.Insert(index_id, index_metric);
+    index_id_lock.Lock();
     index_ids_.insert(index_id);
+    index_id_lock.Unlock();
   }
+  // Get index metric from map
+  index_metrics_.Find(index_id, index_metric);
   return index_metric.get();
 }
 
@@ -211,10 +217,12 @@ void BackendStatsContext::IncrementTxnAborted(oid_t database_id) {
   CompleteQueryMetric();
 }
 
-void BackendStatsContext::InitQueryMetric(std::string query_string,
-                                          oid_t database_oid) {
-  ongoing_query_metric_.reset(
-      new QueryMetric(QUERY_METRIC, query_string, database_oid));
+void BackendStatsContext::InitQueryMetric(
+    const std::shared_ptr<Statement> statement,
+    const std::shared_ptr<QueryMetric::QueryParams> params) {
+  // TODO currently all queries belong to DEFAULT_DB
+  ongoing_query_metric_.reset(new QueryMetric(
+      QUERY_METRIC, statement->GetQueryString(), params, DEFAULT_DB_ID));
 }
 
 //===--------------------------------------------------------------------===//
@@ -272,9 +280,11 @@ void BackendStatsContext::Reset() {
     index_metric->Reset();
   }
 
-  oid_t num_databases = catalog::Catalog::GetInstance()->GetDatabaseCount();
+  oid_t num_databases =
+      storage::StorageManager::GetInstance()->GetDatabaseCount();
   for (oid_t i = 0; i < num_databases; ++i) {
-    auto database = catalog::Catalog::GetInstance()->GetDatabaseWithOffset(i);
+    auto database =
+        storage::StorageManager::GetInstance()->GetDatabaseWithOffset(i);
     oid_t database_id = database->GetOid();
 
     // Reset database metrics
@@ -298,6 +308,7 @@ void BackendStatsContext::Reset() {
       oid_t num_indexes = table->GetIndexCount();
       for (oid_t k = 0; k < num_indexes; ++k) {
         auto index = table->GetIndex(k);
+        if (index == nullptr) continue;
         oid_t index_id = index->GetOid();
         if (index_metrics_.Contains(index_id) == false) {
           std::shared_ptr<IndexMetric> index_metric(

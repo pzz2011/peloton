@@ -89,6 +89,21 @@ typename Cache<Key, Value>::iterator Cache<Key, Value>::insert(
   return cache_itr;
 }
 
+/* @brief deletes a key from the cache
+ *
+ * @param key the key to be deleted
+ *
+ * */
+template <class Key, class Value>
+void Cache<Key, Value>::delete_key(const Key &key) {
+  auto map_itr = map_.find(key);
+  if (map_itr != map_.end()) {
+    /* delete this from the list */
+    list_.erase(map_itr->second.second);
+    this->map_.erase(map_itr);
+  }
+}
+
 /** @brief get the size of the cache
  *    it should always less than or equal to its capacity
  *
@@ -108,6 +123,9 @@ template <class Key, class Value>
 void Cache<Key, Value>::clear(void) {
   list_.clear();
   map_.clear();
+  counts_.clear();
+  capacity_ = DEFAULT_CACHE_SIZE;
+  insert_threshold_ = DEFAULT_CACHE_INSERT_THRESHOLD;
 }
 
 /** @brief is the cache empty

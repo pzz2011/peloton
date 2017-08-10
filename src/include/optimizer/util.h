@@ -10,47 +10,89 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include <cstdlib>
+#include <algorithm>
+#include <string>
+
+#include "expression/abstract_expression.h"
+#include "planner/abstract_plan.h"
+#include "parser/copy_statement.h"
 
 namespace peloton {
+
+namespace catalog {
+class Schema;
+}
+
+namespace storage {
+class DataTable;
+}
+
 namespace optimizer {
-
-using hash_t = std::size_t;
-
 namespace util {
 
-/* Taken from
- * https://github.com/greenplum-db/gpos/blob/b53c1acd6285de94044ff91fbee91589543feba1/libgpos/src/utils.cpp#L126
- */
-inline hash_t HashBytes(const char *bytes, size_t length) {
-  hash_t hash = length;
-  for (size_t i = 0; i < length; ++i) {
-    hash = ((hash << 5) ^ (hash >> 27)) ^ bytes[i];
+inline void to_lower_string(std::string &str) {
+  std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+}
+
+template<class T>
+bool IsSubset (std::unordered_set<T>& super_set, std::unordered_set<T>& child_set) {
+  for (auto element : child_set) {
+    if (super_set.find(element) == super_set.end())
+      return false;
   }
-  return hash;
+  return true;
 }
 
-inline hash_t CombineHashes(hash_t l, hash_t r) {
-  hash_t both[2];
-  both[0] = l;
-  both[1] = r;
-  return HashBytes((char *)both, sizeof(hash_t) * 2);
+template<class T>
+void SetUnion (std::unordered_set<T>& new_set, std::unordered_set<T>& old_set) {
+  for (auto element : old_set)
+    new_set.insert(element);
 }
 
+// get the column IDs evaluated in a predicate
+void GetPredicateColumns(const catalog::Schema *schema,
+                                expression::AbstractExpression *expression,
+                                std::vector<oid_t> &column_ids,
+                                std::vector<ExpressionType> &expr_types,
+                                std::vector<type::Value> &values,
+                                bool &index_searchable);
 
-template <typename T>
-inline hash_t Hash(const T *ptr) {
-  return HashBytes((char *)ptr, sizeof(T));
-}
+bool CheckIndexSearchable(storage::DataTable *target_table,
+                                 expression::AbstractExpression *expression,
+                                 std::vector<oid_t> &key_column_ids,
+                                 std::vector<ExpressionType> &expr_types,
+                                 std::vector<type::Value> &values,
+                                 oid_t &index_id);
 
-template <typename T>
-inline hash_t HashPtr(const T *ptr) {
-  return HashBytes((char *)&ptr, sizeof(void *));
-}
 
-} /* namespace util */
-} /* namespace optimizer */
-} /* namespace peloton */
+
+void SplitPredicates(
+    expression::AbstractExpression* expr,
+    std::vector<expression::AbstractExpression*>& predicates);
+
+expression::AbstractExpression* CombinePredicates(
+    std::vector<expression::AbstractExpression*> predicates);
+
+void ExtractPredicates(expression::AbstractExpression* expr,
+                       SingleTablePredicates& where_predicates,
+                       MultiTablePredicates& join_predicates);
+
+expression::AbstractExpression* ConstructJoinPredicate(
+    std::unordered_set<std::string>& table_alias_set,
+    MultiTablePredicates& join_predicates);
+
+bool ContainsJoinColumns(
+    const std::unordered_set<std::string>& l_group_alias,
+    const std::unordered_set<std::string>& r_group_alias,
+    const expression::AbstractExpression* expr);
+
+
+std::unique_ptr<planner::AbstractPlan> CreateCopyPlan(parser::CopyStatement* copy_stmt);
+
+
+} // namespace util
+} // namespace optimizer
+} // namespace peloton

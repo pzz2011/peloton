@@ -6,12 +6,11 @@
 //
 // Identification: src/executor/abstract_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
-#include "common/value.h"
+#include "type/value.h"
 #include "common/logger.h"
 #include "executor/abstract_executor.h"
 #include "executor/executor_context.h"
@@ -32,7 +31,6 @@ void AbstractExecutor::SetOutput(LogicalTile *table) { output.reset(table); }
 
 // Transfers ownership
 LogicalTile *AbstractExecutor::GetOutput() {
-  // PL_ASSERT(output.get() != nullptr);
   return output.release();
 }
 
@@ -96,14 +94,11 @@ bool AbstractExecutor::Execute() {
   return status;
 }
 
-void AbstractExecutor::SetContext(common::Value *value) {
+void AbstractExecutor::SetContext(type::Value &value) {
   executor_context_->SetParams(value);
 }
 
-void AbstractExecutor::ClearContext() {
-  executor_context_->ClearParams();
-}
-
+void AbstractExecutor::ClearContext() { executor_context_->ClearParams(); }
 
 }  // namespace executor
 }  // namespace peloton

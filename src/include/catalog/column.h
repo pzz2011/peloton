@@ -12,9 +12,10 @@
 
 #pragma once
 
-#include "common/printable.h"
 #include "catalog/constraint.h"
-#include "common/type.h"
+#include "common/macros.h"
+#include "common/printable.h"
+#include "type/type.h"
 
 namespace peloton {
 namespace catalog {
@@ -27,15 +28,24 @@ class Column : public Printable {
   friend class Constraint;
 
  public:
-  Column() {};
+  Column() : column_type(type::TypeId::INVALID), fixed_length(INVALID_OID) {
+    // Nothing to see...
+  }
 
-  Column(common::Type::TypeId value_type, oid_t column_length, std::string column_name,
-         bool is_inlined = false, oid_t column_offset = INVALID_OID)
+  Column(type::TypeId value_type, oid_t column_length,
+         std::string column_name, bool is_inlined = false,
+         oid_t column_offset = INVALID_OID)
       : column_type(value_type),
+        fixed_length(INVALID_OID),
         column_name(column_name),
         is_inlined(is_inlined),
         column_offset(column_offset) {
     SetInlined();
+
+    // We should not have an inline value of length 0
+    if (is_inlined && column_length == 0) {
+      PL_ASSERT(false);
+    }
 
     SetLength(column_length);
   }
@@ -65,16 +75,16 @@ class Column : public Printable {
 
   oid_t GetVariableLength() const { return variable_length; }
 
-  common::Type::TypeId GetType() const { return column_type; }
+  inline type::TypeId GetType() const { return column_type; }
 
-  bool IsInlined() const { return is_inlined; }
+  inline bool IsInlined() const { return is_inlined; }
 
-  bool IsPrimary() const { return is_primary_; }
+  inline bool IsPrimary() const { return is_primary_; }
 
   // Add a constraint to the column
   void AddConstraint(const catalog::Constraint &constraint) {
     constraints.push_back(constraint);
-    if (constraint.GetType() == CONSTRAINT_TYPE_PRIMARY) {
+    if (constraint.GetType() == ConstraintType::PRIMARY) {
       is_primary_ = true;
     }
   }
@@ -98,12 +108,16 @@ class Column : public Printable {
   // MEMBERS
   //===--------------------------------------------------------------------===//
 
+ private:
   // value type of column
-  common::Type::TypeId column_type = common::Type::INVALID;
+  type::TypeId column_type;  //  = type::TypeId::INVALID;
 
   // if the column is not inlined, this is set to pointer size
   // else, it is set to length of the fixed length column
-  oid_t fixed_length = INVALID_OID;
+  oid_t fixed_length;  //  = INVALID_OID;
+
+ public:
+  // TODO: These should all be made private
 
   // if the column is inlined, this is set to 0
   // else, it is set to length of the variable length column
@@ -125,5 +139,5 @@ class Column : public Printable {
   std::vector<Constraint> constraints;
 };
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

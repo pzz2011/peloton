@@ -10,9 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "catalog/constraint.h"
-#include "common/types.h"
+#include "type/types.h"
 
 #include <sstream>
 
@@ -21,16 +20,10 @@ namespace catalog {
 
 const std::string Constraint::GetInfo() const {
   std::ostringstream os;
-
-  os << "\tCONSTRAINT ";
-
-  os << GetName() << " ";
-  os << ConstraintTypeToString(constraint_type);
-
-  os << "\n\n";
-
+  os << "Constraint[" << GetName() << ", "
+     << ConstraintTypeToString(constraint_type) << "]";
   return os.str();
 }
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

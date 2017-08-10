@@ -17,6 +17,7 @@
 #include <iostream>
 #include <ctime>
 
+#include "executor/testing_executor_util.h"
 #include "common/harness.h"
 
 #include "planner/abstract_plan.h"
@@ -25,9 +26,9 @@
 
 #include "catalog/manager.h"
 #include "catalog/schema.h"
-#include "common/types.h"
-#include "common/value.h"
-#include "common/value_factory.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "type/value_factory.h"
 #include "common/timer.h"
 #include "executor/executor_context.h"
 #include "executor/logical_tile.h"
@@ -46,7 +47,6 @@
 #include "storage/tuple.h"
 #include "index/index_factory.h"
 
-#include "executor/executor_tests_util.h"
 #include "executor/mock_executor.h"
 
 using ::testing::NotNull;
@@ -58,7 +58,7 @@ namespace test {
 // Tile Group Layout Tests
 //===--------------------------------------------------------------------===//
 
-class TileGroupLayoutTest : public PelotonTest {};
+class TileGroupLayoutTests : public PelotonTest {};
 
 void ExecuteTileGroupTest() {
   const int tuples_per_tilegroup_count = 10;
@@ -72,7 +72,7 @@ void ExecuteTileGroupTest() {
 
   for (oid_t col_itr = 0; col_itr <= col_count; col_itr++) {
     auto column =
-        catalog::Column(common::Type::INTEGER, common::Type::GetTypeSize(common::Type::INTEGER),
+        catalog::Column(type::TypeId::INTEGER, type::Type::GetTypeSize(type::TypeId::INTEGER),
                         "FIELD" + std::to_string(col_itr), is_inlined);
 
     columns.push_back(column);
@@ -107,12 +107,12 @@ void ExecuteTileGroupTest() {
     unique = true;
 
     index_metadata = new index::IndexMetadata(
-        "primary_index", 123, INVALID_OID, INVALID_OID, INDEX_TYPE_BWTREE,
-        INDEX_CONSTRAINT_TYPE_PRIMARY_KEY, tuple_schema, key_schema, key_attrs,
+        "primary_index", 123, INVALID_OID, INVALID_OID, IndexType::BWTREE,
+        IndexConstraintType::PRIMARY_KEY, tuple_schema, key_schema, key_attrs,
         unique);
 
     std::shared_ptr<index::Index> pkey_index(
-        index::IndexFactory::GetInstance(index_metadata));
+        index::IndexFactory::GetIndex(index_metadata));
     table->AddIndex(pkey_index);
   }
 
@@ -132,7 +132,7 @@ void ExecuteTileGroupTest() {
     storage::Tuple tuple(table_schema, allocate);
 
     for (oid_t col_itr = 0; col_itr <= col_count; col_itr++) {
-      auto value = common::ValueFactory::GetIntegerValue(populate_value + col_itr);
+      auto value = type::ValueFactory::GetIntegerValue(populate_value + col_itr);
       tuple.SetValue(col_itr, value, testing_pool);
     }
 
@@ -175,7 +175,7 @@ void ExecuteTileGroupTest() {
   oid_t col_itr = 0;
   for (auto column_id : column_ids) {
     auto column =
-        catalog::Column(common::Type::INTEGER, common::Type::GetTypeSize(common::Type::INTEGER),
+        catalog::Column(type::TypeId::INTEGER, type::Type::GetTypeSize(type::TypeId::INTEGER),
                         "FIELD" + std::to_string(column_id), is_inlined);
     output_columns.push_back(column);
 
@@ -208,12 +208,12 @@ void ExecuteTileGroupTest() {
   txn_manager.CommitTransaction(txn);
 }
 
-TEST_F(TileGroupLayoutTest, RowLayout) {
+TEST_F(TileGroupLayoutTests, RowLayout) {
   peloton_layout_mode = LAYOUT_TYPE_ROW;
   ExecuteTileGroupTest();
 }
 
-TEST_F(TileGroupLayoutTest, ColumnLayout) {
+TEST_F(TileGroupLayoutTests, ColumnLayout) {
   peloton_layout_mode = LAYOUT_TYPE_COLUMN;
   ExecuteTileGroupTest();
 }

@@ -13,7 +13,7 @@
 #pragma once
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
@@ -27,16 +27,11 @@ namespace planner {
  */
 class SetOpPlan : public AbstractPlan {
  public:
-  SetOpPlan(const SetOpPlan &) = delete;
-  SetOpPlan &operator=(const SetOpPlan &) = delete;
-  SetOpPlan(const SetOpPlan &&) = delete;
-  SetOpPlan &operator=(const SetOpPlan &&) = delete;
-
   SetOpPlan(SetOpType set_op) : set_op_(set_op) {}
 
   SetOpType GetSetOp() const { return set_op_; }
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_SETOP; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::SETOP; }
 
   const std::string GetInfo() const { return "SetOp"; }
 
@@ -47,6 +42,10 @@ class SetOpPlan : public AbstractPlan {
  private:
   /** @brief Set Operation of this node */
   SetOpType set_op_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(SetOpPlan);
 };
-}
-}
+
+}  // namespace planner
+}  // namespace peloton

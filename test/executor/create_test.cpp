@@ -12,13 +12,12 @@
 
 #include <cstdio>
 
-#include "common/harness.h"
-#include "common/logger.h"
 #include "catalog/catalog.h"
-#include "planner/create_plan.h"
+#include "common/harness.h"
+#include "concurrency/transaction_manager_factory.h"
 #include "executor/create_executor.h"
-
-#include "gtest/gtest.h"
+#include "executor/executor_context.h"
+#include "planner/create_plan.h"
 
 namespace peloton {
 namespace test {
@@ -30,29 +29,28 @@ namespace test {
 class CreateTests : public PelotonTest {};
 
 TEST_F(CreateTests, CreatingTable) {
-
   // Bootstrap
-  catalog::Catalog::GetInstance()->CreateDatabase(DEFAULT_DB_NAME, nullptr);
+  auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+  auto txn = txn_manager.BeginTransaction();
+  catalog::Catalog::GetInstance()->CreateDatabase(DEFAULT_DB_NAME, txn);
 
   // Insert a table first
-  auto id_column = catalog::Column(
-      common::Type::INTEGER, common::Type::GetTypeSize(common::Type::INTEGER), "dept_id", true);
+  auto id_column = catalog::Column(type::TypeId::INTEGER,
+                                   type::Type::GetTypeSize(type::TypeId::INTEGER),
+                                   "dept_id", true);
   auto name_column =
-      catalog::Column(common::Type::VARCHAR, 32, "dept_name", false);
+      catalog::Column(type::TypeId::VARCHAR, 32, "dept_name", false);
 
   // Schema
   std::unique_ptr<catalog::Schema> table_schema(
       new catalog::Schema({id_column, name_column}));
 
-  auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-  auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<executor::ExecutorContext> context(
       new executor::ExecutorContext(txn));
 
   // Create plans
   planner::CreatePlan node("department_table", DEFAULT_DB_NAME,
-                           std::move(table_schema),
-                           CreateType::CREATE_TYPE_TABLE);
+                           std::move(table_schema), CreateType::TABLE);
 
   // Create executer
   executor::CreateExecutor executor(&node, context.get());
@@ -72,5 +70,5 @@ TEST_F(CreateTests, CreatingTable) {
   txn_manager.CommitTransaction(txn);
 }
 
-}  // End test namespace
-}  // End peloton namespace
+}  // namespace test
+}  // namespace peloton

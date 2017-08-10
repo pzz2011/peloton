@@ -6,15 +6,12 @@
 //
 // Identification: src/executor/materialization_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
 
 #include "executor/materialization_executor.h"
-
-#include <memory>
-#include <utility>
 
 #include "common/logger.h"
 #include "common/macros.h"
@@ -140,7 +137,7 @@ void MaterializeRowAtAtATime(
     // Get old column information
     std::vector<oid_t> old_column_position_idxs;
     std::vector<size_t> old_column_offsets;
-    std::vector<common::Type::TypeId> old_column_types;
+    std::vector<type::TypeId> old_column_types;
     std::vector<bool> old_is_inlineds;
     std::vector<storage::Tile *> old_tiles;
 
@@ -163,7 +160,7 @@ void MaterializeRowAtAtATime(
       oid_t old_column_id = column_info.origin_column_id;
       const size_t old_column_offset = old_schema->GetOffset(old_column_id);
       old_column_offsets.push_back(old_column_offset);
-      const common::Type::TypeId old_column_type = old_schema->GetType(old_column_id);
+      const type::TypeId old_column_type = old_schema->GetType(old_column_id);
       old_column_types.push_back(old_column_type);
       const bool old_is_inlined = old_schema->IsInlined(old_column_id);
       old_is_inlineds.push_back(old_is_inlined);
@@ -203,7 +200,7 @@ void MaterializeRowAtAtATime(
 
         oid_t base_tuple_id = column_position_list[old_tuple_id];
 
-        std::unique_ptr<common::Value> value(old_tiles[col_itr]->GetValueFast(
+        type::Value value = (old_tiles[col_itr]->GetValueFast(
             base_tuple_id, old_column_offsets[col_itr],
             old_column_types[col_itr], old_is_inlineds[col_itr]));
 
@@ -212,7 +209,7 @@ void MaterializeRowAtAtATime(
                   new_column_offsets[col_itr]);
 
         dest_tile->SetValueFast(
-            *value, new_tuple_id, new_column_offsets[col_itr],
+            value, new_tuple_id, new_column_offsets[col_itr],
             new_is_inlineds[col_itr], new_column_lengths[col_itr]);
 
         // Go to next column
@@ -251,7 +248,7 @@ void MaterializeColumnAtATime(
       // Get old column information
       oid_t old_column_id = column_info.origin_column_id;
       const size_t old_column_offset = old_schema->GetOffset(old_column_id);
-      const common::Type::TypeId old_column_type = old_schema->GetType(old_column_id);
+      const type::TypeId old_column_type = old_schema->GetType(old_column_id);
       const bool old_is_inlined = old_schema->IsInlined(old_column_id);
 
       // Old to new column mapping
@@ -278,14 +275,14 @@ void MaterializeColumnAtATime(
       ///////////////////////////
       for (oid_t old_tuple_id : *source_tile) {
         oid_t base_tuple_id = column_position_list[old_tuple_id];
-        std::unique_ptr<common::Value> value(
+        type::Value value = (
           old_tile->GetValueFast(base_tuple_id, old_column_offset,
             old_column_type, old_is_inlined));
 
         LOG_TRACE("Old Tuple : %u Column : %u ", old_tuple_id, old_col_id);
         LOG_TRACE("New Tuple : %u Column : %u ", new_tuple_id, new_column_id);
 
-        dest_tile->SetValueFast(*value, new_tuple_id, new_column_offset,
+        dest_tile->SetValueFast(value, new_tuple_id, new_column_offset,
                                 new_is_inlined, new_column_length);
 
         // Go to next tuple

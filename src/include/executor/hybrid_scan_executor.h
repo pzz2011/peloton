@@ -6,10 +6,9 @@
 //
 // Identification: src/include/executor/hybrid_scan_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
@@ -43,7 +42,7 @@ class HybridScanExecutor : public AbstractScanExecutor {
 
   oid_t indexed_tile_offset_ = INVALID_OID;
 
-  HybridScanType type_ = HYBRID_SCAN_TYPE_INVALID;
+  HybridScanType type_ = HybridScanType::INVALID;
 
   //  bool build_index_ = true;
 
@@ -84,7 +83,7 @@ class HybridScanExecutor : public AbstractScanExecutor {
   //===--------------------------------------------------------------------===//
   std::vector<oid_t> column_ids_;
 
-  std::vector<common::Value *> values_;
+  std::vector<type::Value> values_;
 
   std::vector<oid_t> full_column_ids_;
 

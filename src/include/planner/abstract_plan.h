@@ -13,18 +13,16 @@
 #pragma once
 
 #include <cstdint>
-#include <iostream>
-#include <map>
 #include <memory>
-#include <vector>
 #include <vector>
 
 #include "catalog/schema.h"
 #include "common/printable.h"
-#include "common/serializeio.h"
-#include "common/serializer.h"
-#include "common/types.h"
-#include "common/value.h"
+#include "planner/binding_context.h"
+#include "type/serializeio.h"
+#include "type/serializer.h"
+#include "type/types.h"
+#include "type/value.h"
 
 namespace peloton {
 
@@ -49,11 +47,6 @@ namespace planner {
 
 class AbstractPlan : public Printable {
  public:
-  AbstractPlan(const AbstractPlan &) = delete;
-  AbstractPlan &operator=(const AbstractPlan &) = delete;
-  AbstractPlan(AbstractPlan &&) = delete;
-  AbstractPlan &operator=(AbstractPlan &&) = delete;
-
   AbstractPlan();
 
   virtual ~AbstractPlan();
@@ -66,7 +59,9 @@ class AbstractPlan : public Printable {
 
   const std::vector<std::unique_ptr<AbstractPlan>> &GetChildren() const;
 
-  const AbstractPlan *GetParent();
+  const AbstractPlan *GetChild(uint32_t child_index) const;
+
+  const AbstractPlan *GetParent() const;
 
   //===--------------------------------------------------------------------===//
   // Accessors
@@ -77,11 +72,24 @@ class AbstractPlan : public Printable {
   virtual PlanNodeType GetPlanNodeType() const = 0;
 
   // Setting values of the parameters in the prepare statement
-  virtual void SetParameterValues(std::vector<common::Value *> *values);
+  virtual void SetParameterValues(std::vector<type::Value> *values);
 
   //===--------------------------------------------------------------------===//
   // Utilities
   //===--------------------------------------------------------------------===//
+
+  // Binding allows a plan to track the source of an attribute/column regardless
+  // of its position in a tuple.  This binding allows a plan to know the types
+  // of all the attributes it uses *before* execution. This is primarily used
+  // by the codegen component since attributes are not positional.
+  virtual void PerformBinding(BindingContext &binding_context) {
+    for (auto &child : GetChildren()) {
+      child->PerformBinding(binding_context);
+    }
+  }
+
+  virtual void GetOutputColumns(std::vector<oid_t> &columns UNUSED_ATTRIBUTE)
+      const { return; }
 
   // Get a string representation for debugging
   const std::string GetInfo() const;
@@ -98,11 +106,9 @@ class AbstractPlan : public Printable {
   // virtual
   //===--------------------------------------------------------------------===//
   virtual bool SerializeTo(SerializeOutput &output UNUSED_ATTRIBUTE) const {
-    PL_ASSERT(&output != nullptr);
     return false;
   }
   virtual bool DeserializeFrom(SerializeInput &input UNUSED_ATTRIBUTE) {
-    PL_ASSERT(&input != nullptr);
     return false;
   }
   virtual int SerializeSize() { return 0; }
@@ -116,6 +122,9 @@ class AbstractPlan : public Printable {
   std::vector<std::unique_ptr<AbstractPlan>> children_;
 
   AbstractPlan *parent_ = nullptr;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(AbstractPlan);
 };
 
 }  // namespace planner

@@ -10,9 +10,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "catalog/column.h"
-#include "common/types.h"
+
+#include <sstream>
+
+#include "type/types.h"
 
 namespace peloton {
 namespace catalog {
@@ -30,8 +32,8 @@ void Column::SetLength(oid_t column_length) {
 
 void Column::SetInlined() {
   switch (column_type) {
-    case common::Type::VARCHAR:
-    case common::Type::VARBINARY:
+    case type::TypeId::VARCHAR:
+    case type::TypeId::VARBINARY:
       break;  // No change of inlined setting
 
     default:
@@ -43,23 +45,32 @@ void Column::SetInlined() {
 const std::string Column::GetInfo() const {
   std::ostringstream os;
 
-  os << " name = " << column_name << ","
-     << " type = " << column_type << ","
-     << " offset = " << column_offset << ","
-     << " fixed length = " << fixed_length << ","
-     << " variable length = " << variable_length << ","
-     << " inlined = " << is_inlined;
+  os << "Column[" << column_name << ", " << TypeIdToString(column_type) << ", "
+     << "Offset:" << column_offset << ", ";
+
+  if (is_inlined) {
+    os << "FixedLength:" << fixed_length;
+  } else {
+    os << "VarLength:" << variable_length;
+  }
 
   if (constraints.empty() == false) {
-    os << "\n";
+    os << ", {";
+    bool first = true;
+    for (auto constraint : constraints) {
+      if (first) {
+        first = false;
+      } else {
+        os << ", ";
+      }
+      os << constraint.GetInfo();
+    }
+    os << "}";
   }
+  os << "]";
 
-  for (auto constraint : constraints) {
-    os << constraint;
-  }
-
-  return os.str();
+  return (os.str());
 }
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

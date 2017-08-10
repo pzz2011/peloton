@@ -10,10 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include "expression/abstract_expression.h"
+#include "common/sql_node_visitor.h"
+#include "type/value.h"
+#include "type/value_factory.h"
 
 namespace peloton {
 namespace expression {
@@ -22,39 +24,35 @@ namespace expression {
 // OperatorExpression
 //===----------------------------------------------------------------------===//
 
-using namespace peloton::common;
-
 class ConjunctionExpression : public AbstractExpression {
  public:
-  ConjunctionExpression(ExpressionType type)
-    : AbstractExpression(type) {}
+  ConjunctionExpression(ExpressionType type) : AbstractExpression(type) {}
 
-  ConjunctionExpression(ExpressionType type,
-                        AbstractExpression *left,
+  ConjunctionExpression(ExpressionType type, AbstractExpression *left,
                         AbstractExpression *right)
-    : AbstractExpression(type, Type::BOOLEAN, left, right) {}
+      : AbstractExpression(type, type::TypeId::BOOLEAN, left, right) {}
 
-  std::unique_ptr<Value> Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
+  type::Value Evaluate(
+      UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
       UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
       UNUSED_ATTRIBUTE executor::ExecutorContext *context) const override {
-    auto vl = left_->Evaluate(tuple1, tuple2, context);
-    auto vr = right_->Evaluate(tuple1, tuple2, context);
+    PL_ASSERT(children_.size() == 2);
+    auto vl = children_[0]->Evaluate(tuple1, tuple2, context);
+    auto vr = children_[1]->Evaluate(tuple1, tuple2, context);
     switch (exp_type_) {
-      case (EXPRESSION_TYPE_CONJUNCTION_AND): {
-        if (vl->IsTrue() && vr->IsTrue())
-          return std::unique_ptr<Value>(new BooleanValue(1));
-        if (vl->IsFalse() || vr->IsFalse())
-          return std::unique_ptr<Value>(new BooleanValue(0));
-        return std::unique_ptr<Value>(new BooleanValue(
-            PELOTON_BOOLEAN_NULL));
+      case (ExpressionType::CONJUNCTION_AND): {
+        if (vl.IsTrue() && vr.IsTrue())
+          return type::ValueFactory::GetBooleanValue(true);
+        if (vl.IsFalse() || vr.IsFalse())
+          return type::ValueFactory::GetBooleanValue(false);
+        return type::ValueFactory::GetBooleanValue(type::PELOTON_BOOLEAN_NULL);
       }
-      case (EXPRESSION_TYPE_CONJUNCTION_OR): {
-        if (vl->IsFalse() && vr->IsFalse())
-          return std::unique_ptr<Value>(new BooleanValue(0));
-        if (vl->IsTrue() || vr->IsTrue())
-          return std::unique_ptr<Value>(new BooleanValue(1));
-        return std::unique_ptr<Value>(new BooleanValue(
-            PELOTON_BOOLEAN_NULL));
+      case (ExpressionType::CONJUNCTION_OR): {
+        if (vl.IsFalse() && vr.IsFalse())
+          return type::ValueFactory::GetBooleanValue(false);
+        if (vl.IsTrue() || vr.IsTrue())
+          return type::ValueFactory::GetBooleanValue(true);
+        return type::ValueFactory::GetBooleanValue(type::PELOTON_BOOLEAN_NULL);
       }
       default:
         throw Exception("Invalid conjunction expression type.");
@@ -62,11 +60,15 @@ class ConjunctionExpression : public AbstractExpression {
   }
 
   AbstractExpression *Copy() const override {
-    return new ConjunctionExpression(exp_type_,
-                                     left_ ? left_->Copy() : nullptr,
-                                     right_ ? right_->Copy() : nullptr);
+    return new ConjunctionExpression(*this);
   }
+
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
+ protected:
+  ConjunctionExpression(const ConjunctionExpression &other)
+      : AbstractExpression(other) {}
 };
 
-}  // End expression namespace
-}  // End peloton namespace
+}  // namespace expression
+}  // namespace peloton

@@ -6,16 +6,15 @@
 //
 // Identification: src/executor/limit_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #include "executor/limit_executor.h"
 
 #include "planner/limit_plan.h"
 #include "common/logger.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "executor/logical_tile.h"
 
 namespace peloton {
@@ -84,5 +83,5 @@ bool LimitExecutor::DExecute() {
   return false;
 }
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

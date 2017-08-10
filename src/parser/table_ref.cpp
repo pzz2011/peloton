@@ -10,16 +10,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "parser/statement_select.h"
 #include "parser/table_ref.h"
+#include "parser/select_statement.h"
 
 namespace peloton {
 namespace parser {
 
 TableRef::~TableRef() {
-  delete table_name;
-  free(alias);
-  free(schema);
+  delete table_info_;
+  delete[] alias;
+  delete[] schema;
 
   delete select;
   delete join;
@@ -30,5 +30,5 @@ TableRef::~TableRef() {
   }
 }
 
-}  // End parser namespace
-}  // End peloton namespace
+}  // namespace parser
+}  // namespace peloton

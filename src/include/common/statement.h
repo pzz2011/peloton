@@ -12,25 +12,27 @@
 
 #pragma once
 
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
-#include <memory>
 
-#include "common/types.h"
+#include "common/printable.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
 class AbstractPlan;
 }
 
+// TODO: Somebody needs to define what the hell this is???
 typedef std::pair<std::vector<unsigned char>, std::vector<unsigned char>>
-    ResultType;
+    StatementResult;
 
 // FIELD INFO TYPE : field name, oid (data type), size
-typedef std::tuple<std::string, oid_t, size_t> FieldInfoType;
+typedef std::tuple<std::string, oid_t, size_t> FieldInfo;
 
-class Statement {
-
+class Statement : public Printable {
  public:
   Statement() = delete;
   Statement(const Statement&) = delete;
@@ -42,7 +44,13 @@ class Statement {
 
   ~Statement();
 
-  std::vector<FieldInfoType> GetTupleDescriptor() const;
+  static void ParseQueryTypeString(const std::string& query_string,
+                             std::string& query_type_string);
+ 
+  static void MapToQueryType(const std::string& query_type_string,
+                             QueryType& query_type);
+
+  std::vector<FieldInfo> GetTupleDescriptor() const;
 
   void SetStatementName(const std::string& statement_name);
 
@@ -52,38 +60,65 @@ class Statement {
 
   std::string GetQueryString() const;
 
-  void SetQueryType(const std::string& query_type);
+  std::string GetQueryTypeString() const;
 
-  std::string GetQueryType() const;
+  QueryType GetQueryType() const;
 
   void SetParamTypes(const std::vector<int32_t>& param_types);
 
   std::vector<int32_t> GetParamTypes() const;
 
-  void SetTupleDescriptor(const std::vector<FieldInfoType>& tuple_descriptor);
+  void SetTupleDescriptor(const std::vector<FieldInfo>& tuple_descriptor);
+
+  void SetReferencedTables(const std::set<oid_t> table_ids);
+
+  const std::set<oid_t> GetReferencedTables() const;
 
   void SetPlanTree(std::shared_ptr<planner::AbstractPlan> plan_tree);
 
   const std::shared_ptr<planner::AbstractPlan>& GetPlanTree() const;
 
+  inline bool GetNeedsPlan() const { return (needs_replan_); }
+
+  inline void SetNeedsPlan(bool replan) { needs_replan_ = replan; }
+
+  // Get a string representation for debugging
+  const std::string GetInfo() const;
+
  private:
   // logical name of statement
-  std::string statement_name;
+  std::string statement_name_;
 
   // query string
-  std::string query_string;
+  std::string query_string_;
 
   // first token in query
-  std::string query_type;
+  // Keep the string token of the query_type because it is returned 
+  // as responses after executing commands.
+  std::string query_type_string_;
+
+  // enum value of query_type
+  QueryType query_type_;
 
   // format codes of the parameters
-  std::vector<int32_t> param_types;
+  std::vector<int32_t> param_types_;
 
   // schema of result tuple
-  std::vector<FieldInfoType> tuple_descriptor;
+  std::vector<FieldInfo> tuple_descriptor_;
 
   // cached plan tree
-  std::shared_ptr<planner::AbstractPlan> plan_tree;
-};
+  std::shared_ptr<planner::AbstractPlan> plan_tree_;
 
+  // the oids of the tables referenced by this statement
+  // this may be empty
+  std::set<oid_t> table_ids_;
+
+  // If this flag is true, then somebody wants us to replan this query
+  bool needs_replan_ = false;
+
+  // containing pairs of <query_type_string, query_type>
+  // use map to speed up searching
+  static std::unordered_map<std::string, QueryType> query_type_map_;
+
+};
 }  // namespace peloton

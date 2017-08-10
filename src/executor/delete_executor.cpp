@@ -6,18 +6,17 @@
 //
 // Identification: src/executor/delete_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #include "executor/delete_executor.h"
 #include "executor/executor_context.h"
 
-#include "common/value.h"
+#include "type/value.h"
 #include "planner/delete_plan.h"
 #include "catalog/manager.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 #include "common/logger.h"
 #include "executor/logical_tile.h"
 #include "storage/data_table.h"
@@ -75,11 +74,7 @@ bool DeleteExecutor::DExecute() {
   std::unique_ptr<LogicalTile> source_tile(children_[0]->GetOutput());
 
   auto &pos_lists = source_tile.get()->GetPositionLists();
-  storage::Tile *tile = source_tile->GetBaseTile(0);
-  storage::TileGroup *tile_group = tile->GetTileGroup();
-  storage::TileGroupHeader *tile_group_header = tile_group->GetHeader();
-  auto tile_group_id = tile_group->GetTileGroupId();
-
+  
   auto &transaction_manager =
       concurrency::TransactionManagerFactory::GetInstance();
 
@@ -95,22 +90,40 @@ bool DeleteExecutor::DExecute() {
 
   // Delete each tuple
   for (oid_t visible_tuple_id : *source_tile) {
+
+    storage::TileGroup *tile_group = source_tile->GetBaseTile(0)->GetTileGroup();
+    storage::TileGroupHeader *tile_group_header = tile_group->GetHeader();
+
     oid_t physical_tuple_id = pos_lists[0][visible_tuple_id];
 
-    ItemPointer old_location(tile_group_id, physical_tuple_id);
+    ItemPointer old_location(tile_group->GetTileGroupId(), physical_tuple_id);
 
     LOG_TRACE("Visible Tuple id : %u, Physical Tuple id : %u ",
               visible_tuple_id, physical_tuple_id);
 
+    // if running at snapshot isolation, 
+    // then we need to retrieve the latest version of this tuple.
+    if (current_txn->GetIsolationLevel() == IsolationLevelType::SNAPSHOT) {
+      old_location = *(tile_group_header->GetIndirection(physical_tuple_id));
+      
+      auto &manager = catalog::Manager::GetInstance();
+      tile_group = manager.GetTileGroup(old_location.block).get();
+      tile_group_header = tile_group->GetHeader();
+
+      physical_tuple_id = old_location.offset;
+    }
+
     bool is_owner = 
         transaction_manager.IsOwner(current_txn, tile_group_header, physical_tuple_id);
-    bool is_written =
-      transaction_manager.IsWritten(current_txn, tile_group_header, physical_tuple_id);
-    PL_ASSERT((is_owner == false && is_written == true) == false);
 
+    bool is_written =
+        transaction_manager.IsWritten(current_txn, tile_group_header, physical_tuple_id);
+
+    // if the current transaction is the creator of this version.
+    // which means the current transaction has already updated the version.
     if (is_owner == true && is_written == true) {
-      // if the thread is the owner of the tuple, then directly update in place.
-      LOG_TRACE("Thread is owner of the tuple");
+      // if the transaction is the owner of the tuple, then directly update in place.
+      LOG_TRACE("The current transaction is the owner of the tuple");
       transaction_manager.PerformDelete(current_txn, old_location);
 
     } else {
@@ -128,14 +141,14 @@ bool DeleteExecutor::DExecute() {
 
 
         if (acquire_ownership_success == false) {
-          transaction_manager.SetTransactionResult(current_txn, Result::RESULT_FAILURE);
+          transaction_manager.SetTransactionResult(current_txn, ResultType::FAILURE);
           return false;
         }
         // if it is the latest version and not locked by other threads, then
         // insert an empty version.
         ItemPointer new_location = target_table_->InsertEmptyVersion();
 
-        // PerformUpdate() will not be executed if the insertion failed.
+        // PerformDelete() will not be executed if the insertion failed.
         // There is a write lock acquired, but since it is not in the write set,
         // because we haven't yet put them into the write set.
         // the acquired lock can't be released when the txn is aborted.
@@ -144,9 +157,9 @@ bool DeleteExecutor::DExecute() {
           LOG_TRACE("Fail to insert new tuple. Set txn failure.");
           if (is_owner == false) {
             // If the ownership is acquire inside this update executor, we release it here
-            transaction_manager.YieldOwnership(current_txn, tile_group_id, physical_tuple_id);
+            transaction_manager.YieldOwnership(current_txn, tile_group_header, physical_tuple_id);
           }
-          transaction_manager.SetTransactionResult(current_txn, Result::RESULT_FAILURE);
+          transaction_manager.SetTransactionResult(current_txn, ResultType::FAILURE);
           return false;
         }
         transaction_manager.PerformDelete(current_txn, old_location, new_location);
@@ -156,7 +169,7 @@ bool DeleteExecutor::DExecute() {
       } else {
         // transaction should be aborted as we cannot update the latest version.
         LOG_TRACE("Fail to update tuple. Set txn failure.");
-        transaction_manager.SetTransactionResult(current_txn, Result::RESULT_FAILURE);
+        transaction_manager.SetTransactionResult(current_txn, ResultType::FAILURE);
         return false;
       }
     }

@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include <memory>
@@ -20,8 +19,13 @@ namespace planner {
 class AbstractPlan;
 }
 
-namespace parser{
+namespace parser {
 class AbstractParse;
+class SQLStatementList;
+}
+
+namespace concurrency {
+class Transaction;
 }
 
 namespace optimizer {
@@ -39,7 +43,11 @@ class AbstractOptimizer {
   AbstractOptimizer();
   virtual ~AbstractOptimizer();
 
+  virtual std::shared_ptr<planner::AbstractPlan> BuildPelotonPlanTree(
+      const std::unique_ptr<parser::SQLStatementList> &parse_tree, concurrency::Transaction *txn) = 0;
+
+  virtual void Reset(){};
 };
 
-} // namespace optimizer
-} // namespace peloton
+}  // namespace optimizer
+}  // namespace peloton

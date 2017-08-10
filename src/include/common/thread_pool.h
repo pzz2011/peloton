@@ -34,8 +34,9 @@ class ThreadPool {
   ~ThreadPool() { }
 
   void Initialize(const size_t &pool_size, const size_t &dedicated_thread_count) {
+    current_thread_count_ = ATOMIC_VAR_INIT(0);
     pool_size_ = pool_size;
-    PL_ASSERT(pool_size_ != 0);
+    // PL_ASSERT(pool_size_ != 0);
 
     dedicated_thread_count_ = dedicated_thread_count;
 
@@ -98,4 +99,4 @@ class ThreadPool {
   std::vector<std::unique_ptr<std::thread>> dedicated_threads_;
 };
 
-}  // End peloton namespace
+}  // namespace peloton

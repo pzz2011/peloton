@@ -17,11 +17,11 @@
 #include <vector>
 #include <atomic>
 
+#include "executor/testing_executor_util.h"
 #include "common/harness.h"
 
 #include "catalog/schema.h"
-#include "common/value_factory.h"
-#include "common/varlen_pool.h"
+#include "type/value_factory.h"
 #include "concurrency/transaction_manager_factory.h"
 
 #include "executor/executor_context.h"
@@ -35,7 +35,6 @@
 #include "storage/tile_group.h"
 #include "storage/table_factory.h"
 
-#include "executor/executor_tests_util.h"
 #include "executor/mock_executor.h"
 
 #include "planner/insert_plan.h"
@@ -68,17 +67,18 @@ static std::unique_ptr<const planner::ProjectInfo> MakeProjectInfoFromTuple(
   DirectMapList direct_map_list;
 
   for (oid_t col_id = START_OID; col_id < tuple->GetColumnCount(); col_id++) {
-    std::unique_ptr<common::Value> value(
+    type::Value value = (
         tuple->GetValue(col_id));
-    auto expression = expression::ExpressionUtil::ConstantValueFactory(*value);
-    target_list.emplace_back(col_id, expression);
+    auto expression = expression::ExpressionUtil::ConstantValueFactory(value);
+    planner::DerivedAttribute attribute{expression};
+    target_list.emplace_back(col_id, attribute);
   }
 
   return std::unique_ptr<const planner::ProjectInfo>(new planner::ProjectInfo(
       std::move(target_list), std::move(direct_map_list)));
 }
 
-void InsertTuple(storage::DataTable *table, common::VarlenPool *pool,
+void InsertTuple(storage::DataTable *table, type::AbstractPool *pool,
                  oid_t tilegroup_count_per_loader,
                  UNUSED_ATTRIBUTE uint64_t thread_itr) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
@@ -88,7 +88,7 @@ void InsertTuple(storage::DataTable *table, common::VarlenPool *pool,
   // Start a txn for each insert
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::Tuple> tuple(
-      ExecutorTestsUtil::GetTuple(table, ++loader_tuple_id, pool));
+      TestingExecutorUtil::GetTuple(table, ++loader_tuple_id, pool));
 
   std::unique_ptr<executor::ExecutorContext> context(
       new executor::ExecutorContext(txn));
@@ -122,7 +122,7 @@ TEST_F(LoaderTests, LoadingTest) {
   UNUSED_ATTRIBUTE oid_t tuple_size = 41;
 
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuples_per_tilegroup, build_indexes));
+      TestingExecutorUtil::CreateTable(tuples_per_tilegroup, build_indexes));
 
   auto testing_pool = TestingHarness::GetInstance().GetTestingPool();
 
@@ -132,22 +132,22 @@ TEST_F(LoaderTests, LoadingTest) {
   auto expected_tile_group_count = 0;
 
   int total_tuple_count = loader_threads_count * tilegroup_count_per_loader * TEST_TUPLES_PER_TILEGROUP;
-  int max_cached_tuple_count = TEST_TUPLES_PER_TILEGROUP * storage::DataTable::active_tilegroup_count_;
-  int max_unfill_cached_tuple_count = (TEST_TUPLES_PER_TILEGROUP - 1) * storage::DataTable::active_tilegroup_count_;
+  int max_cached_tuple_count = TEST_TUPLES_PER_TILEGROUP * storage::DataTable::default_active_tilegroup_count_;
+  int max_unfill_cached_tuple_count = (TEST_TUPLES_PER_TILEGROUP - 1) * storage::DataTable::default_active_tilegroup_count_;
 
   if (total_tuple_count - max_cached_tuple_count <= 0) {
     if (total_tuple_count <= max_unfill_cached_tuple_count) {
-      expected_tile_group_count = storage::DataTable::active_tilegroup_count_;
+      expected_tile_group_count = storage::DataTable::default_active_tilegroup_count_;
     } else {
-      expected_tile_group_count = storage::DataTable::active_tilegroup_count_ + total_tuple_count - max_unfill_cached_tuple_count; 
+      expected_tile_group_count = storage::DataTable::default_active_tilegroup_count_ + total_tuple_count - max_unfill_cached_tuple_count; 
     }
   } else {
-    int filled_tile_group_count = total_tuple_count / max_cached_tuple_count * storage::DataTable::active_tilegroup_count_;
+    int filled_tile_group_count = total_tuple_count / max_cached_tuple_count * storage::DataTable::default_active_tilegroup_count_;
     
     if (total_tuple_count - filled_tile_group_count * TEST_TUPLES_PER_TILEGROUP - max_unfill_cached_tuple_count <= 0) {
-      expected_tile_group_count = filled_tile_group_count + storage::DataTable::active_tilegroup_count_;
+      expected_tile_group_count = filled_tile_group_count + storage::DataTable::default_active_tilegroup_count_;
     } else {
-      expected_tile_group_count = filled_tile_group_count + storage::DataTable::active_tilegroup_count_ + (total_tuple_count - filled_tile_group_count - max_unfill_cached_tuple_count); 
+      expected_tile_group_count = filled_tile_group_count + storage::DataTable::default_active_tilegroup_count_ + (total_tuple_count - filled_tile_group_count - max_unfill_cached_tuple_count); 
     }
   }
 
@@ -155,9 +155,9 @@ TEST_F(LoaderTests, LoadingTest) {
 
   EXPECT_EQ(data_table->GetTileGroupCount(), expected_tile_group_count);
 
-  LOG_INFO("Dataset size : %u MB \n",
-           (expected_tile_group_count * tuples_per_tilegroup * tuple_size) /
-               bytes_to_megabytes_converter);
+  LOG_TRACE("Dataset size : %u MB \n",
+            (expected_tile_group_count * tuples_per_tilegroup * tuple_size) /
+                bytes_to_megabytes_converter);
 }
 
 }  // namespace test

@@ -13,7 +13,7 @@
 #pragma once
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
@@ -23,14 +23,9 @@ namespace planner {
  */
 class AppendPlan : public AbstractPlan {
  public:
-  AppendPlan(const AppendPlan &) = delete;
-  AppendPlan &operator=(const AppendPlan &) = delete;
-  AppendPlan(const AppendPlan &&) = delete;
-  AppendPlan &operator=(const AppendPlan &&) = delete;
-
   AppendPlan() {}
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_APPEND; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::APPEND; }
 
   const std::string GetInfo() const { return "Append"; }
 
@@ -39,7 +34,8 @@ class AppendPlan : public AbstractPlan {
   }
 
  private:
-  // nothing
+  DISALLOW_COPY_AND_MOVE(AppendPlan);
 };
-}
-}
+
+}  // namespace planner
+}  // namespace peloton

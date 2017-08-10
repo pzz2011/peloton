@@ -16,12 +16,12 @@
 
 #include "catalog/schema.h"
 #include "common/abstract_tuple.h"
-#include "common/serializeio.h"
-#include "common/serializer.h"
-#include "common/types.h"
-#include "common/value.h"
-#include "common/value_factory.h"
-#include "common/value_peeker.h"
+#include "type/serializeio.h"
+#include "type/serializer.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "type/value_factory.h"
+#include "type/value_peeker.h"
 
 namespace peloton {
 namespace storage {
@@ -38,35 +38,35 @@ class Tuple : public AbstractTuple {
  public:
   // Default constructor (don't use this)
   inline Tuple()
-      : tuple_schema(nullptr), tuple_data(nullptr), allocated(false) {}
+      : tuple_schema_(nullptr), tuple_data_(nullptr), allocated_(false) {}
 
-  // Setup the tuple given a table
+  // Setup the tuple given a tuple
   inline Tuple(const Tuple &rhs)
-      : tuple_schema(rhs.tuple_schema),
-        tuple_data(rhs.tuple_data),
-        allocated(false) {}
+      : tuple_schema_(rhs.tuple_schema_),
+        tuple_data_(rhs.tuple_data_),
+        allocated_(false) {}
 
   // Setup the tuple given a schema
   inline Tuple(const catalog::Schema *schema)
-      : tuple_schema(schema), tuple_data(nullptr), allocated(false) {
-    PL_ASSERT(tuple_schema);
+      : tuple_schema_(schema), tuple_data_(nullptr), allocated_(false) {
+    PL_ASSERT(tuple_schema_);
   }
 
   // Setup the tuple given a schema and location
   inline Tuple(const catalog::Schema *schema, char *data)
-      : tuple_schema(schema), tuple_data(data), allocated(false) {
-    PL_ASSERT(tuple_schema);
-    PL_ASSERT(tuple_data);
+      : tuple_schema_(schema), tuple_data_(data), allocated_(false) {
+    PL_ASSERT(tuple_schema_);
+    PL_ASSERT(tuple_data_);
   }
 
   // Setup the tuple given a schema and allocate space
   inline Tuple(const catalog::Schema *schema, bool allocate)
-      : tuple_schema(schema), tuple_data(nullptr), allocated(allocate) {
-    PL_ASSERT(tuple_schema);
+      : tuple_schema_(schema), tuple_data_(nullptr), allocated_(allocate) {
+    PL_ASSERT(tuple_schema_);
 
-    if (allocated) {
+    if (allocated_) {
       // initialize heap allocation
-      tuple_data = new char[tuple_schema->GetLength()]();
+      tuple_data_ = new char[tuple_schema_->GetLength()]();
     }
   }
 
@@ -80,14 +80,14 @@ class Tuple : public AbstractTuple {
   // Assignment operator
   Tuple &operator=(const Tuple &rhs);
 
-  void Copy(const void *source, common::VarlenPool *pool = NULL);
+  void Copy(const void *source, type::AbstractPool *pool = NULL);
 
   /**
    * Set the tuple to point toward a given address in a table's
    * backing store
    */
   inline void Move(void *address) {
-    tuple_data = reinterpret_cast<char *>(address);
+    tuple_data_ = reinterpret_cast<char *>(address);
   }
 
   bool operator==(const Tuple &other) const;
@@ -101,58 +101,69 @@ class Tuple : public AbstractTuple {
   // Getters and Setters
   //===--------------------------------------------------------------------===//
 
+  // This is used to access the internal array to read simple data types
+  // such as integer type
+  template <typename ColumnType>
+  inline ColumnType GetInlinedDataOfType(oid_t column_id) const;
+
   // Get the value of a specified column (const)
   // (expensive) checks the schema to see how to return the Value.
-  common::Value *GetValue(oid_t column_id) const;
+  type::Value GetValue(oid_t column_id) const;
 
   /**
    * Allocate space to copy strings that can't be inlined rather
    * than copying the pointer.
-   *
-   * Used when setting a NValue that will go into permanent storage in a
-   *persistent table.
    * It is also possible to provide NULL for stringPool in which case
    * the strings will be allocated on the heap.
    */
-  void SetValue(const oid_t column_id, const common::Value &value,
-                common::VarlenPool *dataPool);
+  void SetValue(const oid_t column_id, const type::Value &value,
+                type::AbstractPool *dataPool);
 
   // set value without data pool.
-  void SetValue(oid_t column_id, const common::Value &value);
+  // This just calls the other SetValue with a nullptr pool
+  void SetValue(oid_t column_id, const type::Value &value) {
+    SetValue(column_id, value, nullptr);
+  }
 
-  inline int GetLength() const { return tuple_schema->GetLength(); }
+  inline int GetLength() const { return tuple_schema_->GetLength(); }
 
   // Is the column value null ?
   inline bool IsNull(const uint64_t column_id) const {
-    std::unique_ptr<common::Value> value(GetValue(column_id));
-    return value->IsNull();
+    type::Value value = (GetValue(column_id));
+    return value.IsNull();
   }
 
   // Is the tuple null ?
-  inline bool IsNull() const { return tuple_data == NULL; }
+  inline bool IsNull() const { return tuple_data_ == NULL; }
 
   // Get the type of a particular column in the tuple
-  inline common::Type::TypeId GetType(int column_id) const {
-    return tuple_schema->GetType(column_id);
+  inline type::TypeId GetType(int column_id) const {
+    return tuple_schema_->GetType(column_id);
   }
 
-  inline const catalog::Schema *GetSchema() const { return tuple_schema; }
+  inline const catalog::Schema *GetSchema() const { return tuple_schema_; }
 
   // Get the address of this tuple in the table's backing store
-  inline char *GetData() const { return tuple_data; }
+  inline char *GetData() const { return tuple_data_; }
+
+  char *GetDataPtr(const oid_t column_id);
+
+  const char *GetDataPtr(const oid_t column_id) const;
 
   // Return the number of columns in this tuple
-  inline oid_t GetColumnCount() const { return tuple_schema->GetColumnCount(); }
+  inline oid_t GetColumnCount() const {
+    return tuple_schema_->GetColumnCount();
+  }
 
-  bool EqualsNoSchemaCheck(const Tuple &other) const;
+  bool EqualsNoSchemaCheck(const AbstractTuple &other) const;
 
-  bool EqualsNoSchemaCheck(const Tuple &other,
+  bool EqualsNoSchemaCheck(const AbstractTuple &other,
                            const std::vector<oid_t> &columns) const;
 
   // this does set NULL in addition to clear string count.
   void SetAllNulls();
 
-  void SetNull() { tuple_data = NULL; }
+  void SetNull() { tuple_data_ = NULL; }
 
   // this does set 0 to all values. VarlenValue is set to "0"
   void SetAllZeros();
@@ -170,7 +181,7 @@ class Tuple : public AbstractTuple {
   // This sets the relevant columns from the source tuple
   void SetFromTuple(const AbstractTuple *tuple,
                     const std::vector<oid_t> &columns,
-                    common::VarlenPool *pool);
+                    type::AbstractPool *pool);
 
   // Used to wrap read only tuples in indexing code.
   void MoveToTuple(const void *address);
@@ -184,53 +195,71 @@ class Tuple : public AbstractTuple {
                          uint8_t *null_array);
   void SerializeWithHeaderTo(SerializeOutput &output);
 
-  void DeserializeFrom(SerializeInput &input, common::VarlenPool *pool);
+  void DeserializeFrom(SerializeInput &input, type::AbstractPool *pool);
   void DeserializeWithHeaderFrom(SerializeInput &input);
 
   size_t HashCode(size_t seed) const;
   size_t HashCode() const;
 
-  // Get a string representation of this tuple
-  friend std::ostream &operator<<(std::ostream &os, const Tuple &tuple);
-
   // Get a string representation for debugging
   const std::string GetInfo() const;
 
  private:
-  char *GetDataPtr(const oid_t column_id);
-
-  const char *GetDataPtr(const oid_t column_id) const;
-
   //===--------------------------------------------------------------------===//
   // Data members
   //===--------------------------------------------------------------------===//
 
   // The types of the columns in the tuple
-  const catalog::Schema *tuple_schema;
+  const catalog::Schema *tuple_schema_;
 
   // The tuple data, padded at the front by the TUPLE_HEADER
-  char *tuple_data;
+  char *tuple_data_;
 
   // Allocated or not ?
-  bool allocated;
+  bool allocated_;
 };
 
 //===--------------------------------------------------------------------===//
 // Implementation
 //===--------------------------------------------------------------------===//
 
+/*
+ * GetInlineDataOfType() - This functions returns a reinterpreted object of
+ *                         a type given by the caller
+ *
+ * Please note this function simply translates column ID into offsets into
+ * the data array. Non-inlined objects and objects that need special treatment
+ * could not be copied like this, and they must use a Value object
+ *
+ * NOTE: It assumes all fileds are inlined. This should be checked elsewhere
+ */
+template <typename ColumnType>
+inline ColumnType Tuple::GetInlinedDataOfType(oid_t column_id) const {
+  // The requested field must be inlined
+  PL_ASSERT(tuple_schema_->IsInlined(column_id) == true);
+  PL_ASSERT(column_id < GetColumnCount());
+
+  // Translates column ID into a pointer and converts it to the
+  // requested type
+  const ColumnType *ptr =
+      reinterpret_cast<const ColumnType *>(GetDataPtr(column_id));
+
+  return *ptr;
+}
+
 // Setup the tuple given the specified data location and schema
 inline Tuple::Tuple(char *data, catalog::Schema *schema) {
   PL_ASSERT(data);
   PL_ASSERT(schema);
 
-  tuple_data = data;
-  tuple_schema = schema;
+  tuple_data_ = data;
+  tuple_schema_ = schema;
+  allocated_ = false;  // ???
 }
 
 inline Tuple &Tuple::operator=(const Tuple &rhs) {
-  tuple_schema = rhs.tuple_schema;
-  tuple_data = rhs.tuple_data;
+  tuple_schema_ = rhs.tuple_schema_;
+  tuple_data_ = rhs.tuple_data_;
   return *this;
 }
 
@@ -254,5 +283,5 @@ class TupleComparator {
   }
 };
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

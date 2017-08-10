@@ -6,10 +6,9 @@
 //
 // Identification: src/include/executor/seq_scan_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
@@ -29,12 +28,28 @@ class SeqScanExecutor : public AbstractScanExecutor {
   explicit SeqScanExecutor(const planner::AbstractPlan *node,
                            ExecutorContext *executor_context);
 
- protected:
-  bool DInit();
+  void UpdatePredicate(const std::vector<oid_t> &column_ids,
+                       const std::vector<type::Value> &values) override;
 
-  bool DExecute();
+  void ResetState() override { current_tile_group_offset_ = START_OID; }
+
+ protected:
+  bool DInit() override ;
+
+  bool DExecute() override ;
 
  private:
+  //===--------------------------------------------------------------------===//
+  // Helper Functions
+  //===--------------------------------------------------------------------===//
+
+  expression::AbstractExpression *ColumnsValuesToExpr(
+      const std::vector<oid_t> &predicate_column_ids,
+      const std::vector<type::Value> &values, size_t idx);
+
+  expression::AbstractExpression *ColumnValueToCmpExpr(
+      const oid_t column_id, const type::Value &value);
+
   //===--------------------------------------------------------------------===//
   // Executor State
   //===--------------------------------------------------------------------===//
@@ -49,8 +64,18 @@ class SeqScanExecutor : public AbstractScanExecutor {
   // Plan Info
   //===--------------------------------------------------------------------===//
 
+  bool index_done_ = false;
+
   /** @brief Pointer to table to scan from. */
   storage::DataTable *target_table_ = nullptr;
+
+  // TODO make predicate_ a unique_ptr
+  // this is a hack that prevents memory leak
+  std::unique_ptr<expression::AbstractExpression> new_predicate_ = nullptr;
+
+  // The original predicate, if it's not nullptr
+  // we need to combine it with the undated predicate 
+  const expression::AbstractExpression *old_predicate_;
 };
 
 }  // namespace executor

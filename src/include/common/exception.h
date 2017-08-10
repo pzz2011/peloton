@@ -10,20 +10,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <iostream>
+#include <cxxabi.h>
+#include <errno.h>
+#include <execinfo.h>
+#include <signal.h>
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
-#include <execinfo.h>
-#include <errno.h>
-#include <cxxabi.h>
-#include <signal.h>
+#include <iostream>
 #include <memory>
+#include <stdexcept>
 
-#include "common/types.h"
+#include "type/type.h"
+#include "type/types.h"
 
 namespace peloton {
 
@@ -52,7 +52,9 @@ enum ExceptionType {
   EXCEPTION_TYPE_EXECUTOR = 17,          // executor related
   EXCEPTION_TYPE_CONSTRAINT = 18,        // constraint related
   EXCEPTION_TYPE_INDEX = 19,             // index related
-  EXCEPTION_TYPE_STAT = 20               // stat related
+  EXCEPTION_TYPE_STAT = 20,              // stat related
+  EXCEPTION_TYPE_CONNECTION = 21,        // connection related
+  EXCEPTION_TYPE_SYNTAX = 22,            // syntax related
 };
 
 class Exception : public std::runtime_error {
@@ -86,7 +88,7 @@ class Exception : public std::runtime_error {
       case EXCEPTION_TYPE_MISMATCH_TYPE:
         return "Mismatch Type";
       case EXCEPTION_TYPE_DIVIDE_BY_ZERO:
-        return "Divede by Zero";
+        return "Divide by Zero";
       case EXCEPTION_TYPE_OBJECT_SIZE:
         return "Object Size";
       case EXCEPTION_TYPE_INCOMPATIBLE_TYPE:
@@ -113,6 +115,12 @@ class Exception : public std::runtime_error {
         return "Constraint";
       case EXCEPTION_TYPE_INDEX:
         return "Index";
+      case EXCEPTION_TYPE_STAT:
+        return "Stat";
+      case EXCEPTION_TYPE_CONNECTION:
+        return "Connection";
+      case EXCEPTION_TYPE_SYNTAX:
+        return "Syntax";
       default:
         return "Unknown";
     }
@@ -200,33 +208,42 @@ class CastException : public Exception {
   CastException() = delete;
 
  public:
-  CastException(const ValueType origType, const ValueType newType)
+  CastException(const type::TypeId origType,
+                const type::TypeId newType)
       : Exception(EXCEPTION_TYPE_CONVERSION,
-                  "Type " + ValueTypeToString(origType) + " can't be cast as " +
-                      ValueTypeToString(newType)) {}
+                  "Type " + TypeIdToString(origType) + " can't be cast as " +
+                      TypeIdToString(newType)) {}
 };
 
 class ValueOutOfRangeException : public Exception {
   ValueOutOfRangeException() = delete;
 
  public:
-  ValueOutOfRangeException(const int64_t value, const ValueType origType,
-                           const ValueType newType)
+  ValueOutOfRangeException(const int64_t value,
+                           const type::TypeId origType,
+                           const type::TypeId newType)
       : Exception(EXCEPTION_TYPE_CONVERSION,
-                  "Type " + ValueTypeToString(origType) + " with value " +
+                  "Type " + TypeIdToString(origType) + " with value " +
                       std::to_string((intmax_t)value) +
                       " can't be cast as %s because the value is out of range "
                       "for the destination type " +
-                      ValueTypeToString(newType)) {}
+                      TypeIdToString(newType)) {}
 
-  ValueOutOfRangeException(const double value, const ValueType origType,
-                           const ValueType newType)
+  ValueOutOfRangeException(const double value,
+                           const type::TypeId origType,
+                           const type::TypeId newType)
       : Exception(EXCEPTION_TYPE_CONVERSION,
-                  "Type " + ValueTypeToString(origType) + " with value " +
+                  "Type " + TypeIdToString(origType) + " with value " +
                       std::to_string(value) +
                       " can't be cast as %s because the value is out of range "
                       "for the destination type " +
-                      ValueTypeToString(newType)) {}
+                      TypeIdToString(newType)) {}
+  ValueOutOfRangeException(const type::TypeId varType,
+                           const size_t length)
+      : Exception(EXCEPTION_TYPE_OUT_OF_RANGE,
+                  "The value is too long to fit into type " +
+                          TypeIdToString(varType) +
+                          "(" + std::to_string(length) + ")") {};
 };
 
 class ConversionException : public Exception {
@@ -257,12 +274,11 @@ class TypeMismatchException : public Exception {
   TypeMismatchException() = delete;
 
  public:
-  TypeMismatchException(std::string msg, const ValueType type_1,
-                        const ValueType type_2)
+  TypeMismatchException(std::string msg, const type::TypeId type_1,
+                        const type::TypeId type_2)
       : Exception(EXCEPTION_TYPE_MISMATCH_TYPE,
-                  "Type " + ValueTypeToString(type_1) +
-                      " does not match with " + ValueTypeToString(type_2) +
-                      msg) {}
+                  "Type " + TypeIdToString(type_1) + " does not match with " +
+                      TypeIdToString(type_2) + msg) {}
 };
 
 class NumericValueOutOfRangeException : public Exception {
@@ -299,9 +315,10 @@ class IncompatibleTypeException : public Exception {
 
  public:
   IncompatibleTypeException(int type, std::string msg)
-      : Exception(
-            EXCEPTION_TYPE_INCOMPATIBLE_TYPE,
-            "Incompatible type " + ValueTypeToString((ValueType)type) + msg) {}
+      : Exception(EXCEPTION_TYPE_INCOMPATIBLE_TYPE,
+                  "Incompatible type " +
+                      TypeIdToString(static_cast<type::TypeId>(type)) +
+                      msg) {}
 };
 
 class SerializationException : public Exception {
@@ -373,6 +390,14 @@ class ExecutorException : public Exception {
       : Exception(EXCEPTION_TYPE_EXECUTOR, msg) {}
 };
 
+class SyntaxException : public Exception {
+  SyntaxException() = delete;
+
+ public:
+  SyntaxException(std::string msg)
+      : Exception(EXCEPTION_TYPE_SYNTAX, msg) {}
+};
+
 class ConstraintException : public Exception {
   ConstraintException() = delete;
 
@@ -392,7 +417,15 @@ class StatException : public Exception {
   StatException() = delete;
 
  public:
-  StatException(std::string msg) : Exception(EXCEPTION_TYPE_INDEX, msg) {}
+  StatException(std::string msg) : Exception(EXCEPTION_TYPE_STAT, msg) {}
 };
 
-}  // End peloton namespace
+class ConnectionException : public Exception {
+  ConnectionException() = delete;
+
+ public:
+  ConnectionException(std::string msg)
+      : Exception(EXCEPTION_TYPE_CONNECTION, msg) {}
+};
+
+}  // namespace peloton

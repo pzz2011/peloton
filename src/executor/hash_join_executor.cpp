@@ -6,19 +6,16 @@
 //
 // Identification: src/executor/hash_join_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
-#include <vector>
-
-#include "common/types.h"
+#include "type/types.h"
 #include "common/logger.h"
 #include "executor/logical_tile_factory.h"
 #include "executor/hash_join_executor.h"
 #include "expression/abstract_expression.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 namespace peloton {
 namespace executor {
@@ -38,7 +35,7 @@ bool HashJoinExecutor::DInit() {
   if (status == false) return status;
 
   PL_ASSERT(children_[1]->GetRawNode()->GetPlanNodeType() ==
-            PLAN_NODE_TYPE_HASH);
+            PlanNodeType::HASH);
 
   hash_executor_ = reinterpret_cast<HashExecutor *>(children_[1]);
 
@@ -111,13 +108,21 @@ bool HashJoinExecutor::DExecute() {
 
     // Go over the left tile
     for (auto left_tile_itr : *left_tile) {
-      const expression::ContainerTuple<executor::LogicalTile> left_tuple(
+      const ContainerTuple<executor::LogicalTile> left_tuple(
           left_tile, left_tile_itr, &hashed_col_ids);
 
       // Find matching tuples in the hash table built on top of the right table
       auto right_tuples = hash_table.find(left_tuple);
 
       if (right_tuples != hash_table.end()) {
+    	// Not yet supported due to assertion in gettomg right_tuples->first
+//    	if (predicate_ != nullptr) {
+//    		auto eval = predicate_->Evaluate(&left_tuple, &right_tuples->first,
+//					executor_context_);
+//			if (eval.IsFalse())
+//				continue;
+//    	}
+
         RecordMatchedLeftRow(left_result_tiles_.size() - 1, left_tile_itr);
 
         // Go over the matching right tuples

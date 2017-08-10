@@ -6,33 +6,38 @@
 //
 // Identification: src/include/executor/plan_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
 #include "common/statement.h"
-#include "common/types.h"
 #include "executor/abstract_executor.h"
+#include "type/types.h"
 
 namespace peloton {
-namespace bridge {
 
-//===--------------------------------------------------------------------===//
+namespace concurrency {
+class Transaction;
+}
+
+namespace executor {
+
+//===----------------------------------------------------------------------===//
 // Plan Executor
-//===--------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 
-typedef struct peloton_status {
-  peloton::Result m_result;
+typedef struct ExecuteResult {
+  peloton::ResultType m_result;
   int *m_result_slots;
 
   // number of tuples processed
   uint32_t m_processed;
 
-  peloton_status() {
+  ExecuteResult() {
     m_processed = 0;
-    m_result = peloton::RESULT_SUCCESS;
+    m_result = peloton::ResultType::SUCCESS;
     m_result_slots = nullptr;
   }
 
@@ -42,19 +47,11 @@ typedef struct peloton_status {
   bool SerializeTo(peloton::SerializeOutput &output);
   bool DeserializeFrom(peloton::SerializeInput &input);
 
-} peloton_status;
+} ExecuteResult;
 
 class PlanExecutor {
  public:
-  PlanExecutor(const PlanExecutor &) = delete;
-  PlanExecutor &operator=(const PlanExecutor &) = delete;
-  PlanExecutor(PlanExecutor &&) = delete;
-  PlanExecutor &operator=(PlanExecutor &&) = delete;
-
   PlanExecutor(){};
-
-  static void PrintPlan(const planner::AbstractPlan *plan,
-                        std::string prefix = "");
 
   // Copy From
   static inline void copyFromTo(const std::string &src,
@@ -68,23 +65,16 @@ class PlanExecutor {
     }
   }
 
-  /* TODO: Delete this mothod
-    static peloton_status ExecutePlan(const planner::AbstractPlan *plan,
-                                      ParamListInfo m_param_list,
-                                      TupleDesc m_tuple_desc);
-  */
-
   /*
-   * @brief Use std::vector<common::Value *> as params to make it more elegant
-   * for
-   * networking
-   *        Before ExecutePlan, a node first receives value list, so we should
-   * pass
-   *        value list directly rather than passing Postgres's ParamListInfo
+   * @brief Use std::vector<type::Value> as params to make it more elegant
+   * for network
+   * Before ExecutePlan, a node first receives value list, so we should
+   * pass value list directly rather than passing Postgres's ParamListInfo
    */
-  static peloton_status ExecutePlan(const planner::AbstractPlan *plan,
-                                    const std::vector<common::Value *> &params,
-                                    std::vector<ResultType> &result,
+  static ExecuteResult ExecutePlan(std::shared_ptr<planner::AbstractPlan> plan,
+                                    concurrency::Transaction* txn,
+                                    const std::vector<type::Value> &params,
+                                    std::vector<StatementResult> &result,
                                     const std::vector<int> &result_format);
 
   /*
@@ -92,11 +82,14 @@ class PlanExecutor {
    * @param plan and params
    * @return the number of tuple it executes and logical_tile_list
    */
+  // FIXME This should be removed when PelotonService is removed/rewritten
   static int ExecutePlan(
-      const planner::AbstractPlan *plan,
-      const std::vector<common::Value *> &params,
+      const planner::AbstractPlan *plan, const std::vector<type::Value> &params,
       std::vector<std::unique_ptr<executor::LogicalTile>> &logical_tile_list);
+
+ private:
+  DISALLOW_COPY_AND_MOVE(PlanExecutor);
 };
 
-}  // namespace bridge
+}  // namespace executor
 }  // namespace peloton

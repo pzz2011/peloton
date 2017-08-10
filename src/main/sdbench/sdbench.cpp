@@ -10,14 +10,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include <iostream>
 #include <fstream>
 
-#include "benchmark/sdbench/sdbench_configuration.h"
 #include "common/logger.h"
+#include "benchmark/sdbench/sdbench_configuration.h"
 #include "benchmark/sdbench/sdbench_workload.h"
 #include "benchmark/sdbench/sdbench_loader.h"
+#include "concurrency/epoch_manager_factory.h"
 
 #include <google/protobuf/stubs/common.h>
 
@@ -29,44 +29,28 @@ configuration state;
 
 // Main Entry Point
 void RunBenchmark() {
-  // Initialize settings
-  peloton_layout_mode = state.layout_mode;
 
-  // Generate sequence
-  GenerateSequence(state.column_count);
+  concurrency::EpochManagerFactory::Configure(EpochType::DECENTRALIZED_EPOCH);
 
-  // Single run
-  if (state.experiment_type == EXPERIMENT_TYPE_INVALID) {
-    CreateAndLoadTable((LayoutType)peloton_layout_mode);
+  std::unique_ptr<std::thread> epoch_thread;
 
-    switch (state.operator_type) {
-      case OPERATOR_TYPE_DIRECT:
-        RunDirectTest();
-        break;
+  concurrency::EpochManager &epoch_manager = concurrency::EpochManagerFactory::GetInstance();
 
-      case OPERATOR_TYPE_INSERT:
-        RunInsertTest();
-        break;
+  epoch_manager.RegisterThread(0);
 
-      default:
-        LOG_ERROR("Unsupported test type : %d", state.operator_type);
-        break;
-    }
+  epoch_manager.StartEpoch(epoch_thread);
 
+  if (state.multi_stage) {
+    // Run holistic indexing comparison benchmark
+    RunMultiStageBenchmark();
+  } else {
+    // Run a single sdbench test
+    RunSDBenchTest();
   }
-  // Experiment
-  else {
-    switch (state.experiment_type) {
 
-      case EXPERIMENT_TYPE_ADAPT:
-        RunAdaptExperiment();
-        break;
+  epoch_manager.StopEpoch();
 
-      default:
-        LOG_ERROR("Unsupported experiment_type : %d", state.experiment_type);
-        break;
-    }
-  }
+  epoch_thread->join();
 }
 
 }  // namespace sdbench

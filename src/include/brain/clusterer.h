@@ -19,7 +19,7 @@
 #include "common/printable.h"
 #include "brain/sample.h"
 #include "common/printable.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace brain {
@@ -90,5 +90,5 @@ class Clusterer : public Printable {
   oid_t sample_column_count_;
 };
 
-}  // End brain namespace
-}  // End peloton namespace
+}  // namespace brain
+}  // namespace peloton

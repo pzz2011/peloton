@@ -6,31 +6,33 @@
 //
 // Identification: src/include/executor/aggregate_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
 #include "executor/abstract_executor.h"
-#include "storage/data_table.h"
-#include "common/varlen_pool.h"
 
 #include <vector>
 
 namespace peloton {
+
+namespace storage {
+class DataTable;
+}
+
 namespace executor {
 
 /**
  * The actual executor class templated on the type of aggregation that
  * should be performed.
  *
- * If it is instantiated using PLAN_NODE_TYPE_AGGREGATE,
+ * If it is instantiated using PlanNodeType::AGGREGATE,
  * then it will do a constant space aggregation that expects the input table
  * to be sorted on the group by key.
  *
- * If it is instantiated using PLAN_NODE_TYPE_HASHAGGREGATE,
+ * If it is instantiated using PlanNodeType::HASHAGGREGATE,
  * then the input does not need to be sorted and it will hash the group by key
  * to aggregate the tuples.
  */
@@ -65,7 +67,7 @@ class AggregateExecutor : public AbstractExecutor {
   bool done = false;
 
   /** @brief Output table. */
-  storage::DataTable *output_table = nullptr;
+  storage::AbstractTable *output_table = nullptr;
 };
 
 }  // namespace executor

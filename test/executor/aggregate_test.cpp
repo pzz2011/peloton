@@ -10,27 +10,26 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "executor/testing_executor_util.h"
 #include "common/harness.h"
 
-#include "common/types.h"
-#include "common/value.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "concurrency/transaction_manager_factory.h"
+#include "executor/aggregate_executor.h"
 #include "executor/executor_context.h"
 #include "executor/logical_tile.h"
-#include "executor/aggregate_executor.h"
 #include "executor/logical_tile_factory.h"
 #include "expression/expression_util.h"
 #include "planner/abstract_plan.h"
 #include "planner/aggregate_plan.h"
 #include "storage/data_table.h"
-#include "concurrency/transaction_manager_factory.h"
 
-#include "executor/executor_tests_util.h"
 #include "executor/mock_executor.h"
 
 using ::testing::NotNull;
@@ -42,8 +41,7 @@ namespace test {
 class AggregateTests : public PelotonTest {};
 
 TEST_F(AggregateTests, SortedDistinctTest) {
-
-  //SELECT d, a, b, c FROM table GROUP BY a, b, c, d;
+  // SELECT d, a, b, c FROM table GROUP BY a, b, c, d;
   const int tuple_count = TESTS_TUPLES_PER_TILEGROUP;
 
   // Create a table and wrap it in logical tiles
@@ -51,8 +49,8 @@ TEST_F(AggregateTests, SortedDistinctTest) {
   auto txn = txn_manager.BeginTransaction();
 
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    false, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -93,7 +91,7 @@ TEST_F(AggregateTests, SortedDistinctTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_SORTED);
+                              output_table_schema, AggregateType::SORTED);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -122,25 +120,26 @@ TEST_F(AggregateTests, SortedDistinctTest) {
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
+  LOG_TRACE("%s", result_tile->GetInfo().c_str());
+  ASSERT_TRUE(result_tile->GetTupleCount() > 0);
 
-  std::unique_ptr<common::Value> val(result_tile->GetValue(0, 2));
-  std::unique_ptr<common::Value> cmp(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(1)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 3));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetDoubleValue(2)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(5, 2));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(51)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(5, 3));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetDoubleValue(52)));
-  EXPECT_TRUE(cmp->IsTrue());
+  type::Value val = (result_tile->GetValue(0, 2));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(1)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 3));
+  cmp = (val.CompareEquals(type::ValueFactory::GetDecimalValue(2)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(5, 2));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(51)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(5, 3));
+  cmp = (val.CompareEquals(type::ValueFactory::GetDecimalValue(52)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 }
 
 TEST_F(AggregateTests, SortedSumGroupByTest) {
-
-  //SELECT a, SUM(b) from table GROUP BY a;
+  // SELECT a, SUM(b) from table GROUP BY a;
   const int tuple_count = TESTS_TUPLES_PER_TILEGROUP;
 
   // Create a table and wrap it in logical tiles
@@ -148,8 +147,8 @@ TEST_F(AggregateTests, SortedSumGroupByTest) {
   auto txn = txn_manager.BeginTransaction();
 
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    false, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -173,8 +172,9 @@ TEST_F(AggregateTests, SortedSumGroupByTest) {
   // 3) Set up unique aggregates
   std::vector<planner::AggregatePlan::AggTerm> agg_terms;
   planner::AggregatePlan::AggTerm sumb(
-      EXPRESSION_TYPE_AGGREGATE_SUM,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1));
+      ExpressionType::AGGREGATE_SUM,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1));
   agg_terms.push_back(sumb);
 
   // 4) Set up predicate (empty)
@@ -193,7 +193,7 @@ TEST_F(AggregateTests, SortedSumGroupByTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_SORTED);
+                              output_table_schema, AggregateType::SORTED);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -224,33 +224,32 @@ TEST_F(AggregateTests, SortedSumGroupByTest) {
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
-  std::shared_ptr<common::Value> val(result_tile->GetValue(0, 0));
-  std::shared_ptr<common::Value> cmp(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(0)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 1));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(105)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(1, 0));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(10)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(1, 1));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(355)));
-  EXPECT_TRUE(cmp->IsTrue());
+  type::Value val = (result_tile->GetValue(0, 0));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(0)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(105)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(1, 0));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(10)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(1, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(355)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 }
 
 TEST_F(AggregateTests, SortedSumMaxGroupByTest) {
-
-  //SELECT a, SUM(b), MAX(c) from table GROUP BY a;
+  // SELECT a, SUM(b), MAX(c) from table GROUP BY a;
   const int tuple_count = TESTS_TUPLES_PER_TILEGROUP;
 
   // Create a table and wrap it in logical tiles
   auto& txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
+      TestingExecutorUtil::CreateTable(tuple_count, false));
 
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    false, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -274,11 +273,13 @@ TEST_F(AggregateTests, SortedSumMaxGroupByTest) {
   // 3) Set up unique aggregates
   std::vector<planner::AggregatePlan::AggTerm> agg_terms;
   planner::AggregatePlan::AggTerm sumb(
-      EXPRESSION_TYPE_AGGREGATE_SUM,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1));
+      ExpressionType::AGGREGATE_SUM,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1));
   planner::AggregatePlan::AggTerm maxc(
-      EXPRESSION_TYPE_AGGREGATE_MAX,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::DECIMAL, 0, 2));
+      ExpressionType::AGGREGATE_MAX,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::DECIMAL, 0,
+                                                    2));
   agg_terms.push_back(sumb);
   agg_terms.push_back(maxc);
 
@@ -298,7 +299,7 @@ TEST_F(AggregateTests, SortedSumMaxGroupByTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_SORTED);
+                              output_table_schema, AggregateType::SORTED);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -329,23 +330,143 @@ TEST_F(AggregateTests, SortedSumMaxGroupByTest) {
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
-  std::unique_ptr<common::Value> val(result_tile->GetValue(0, 0));
-  std::unique_ptr<common::Value> cmp(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(0)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 1));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(105)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 2));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetDoubleValue(42)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(1, 0));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(10)));
-  EXPECT_TRUE(cmp->IsTrue());
+  type::Value val = (result_tile->GetValue(0, 0));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(0)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(105)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 2));
+  cmp = (val.CompareEquals(type::ValueFactory::GetDecimalValue(42)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(1, 0));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(10)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+}
+
+TEST_F(AggregateTests, MinMaxTest) {
+  // SELECT MIN(b), MAX(b), MIN(c), MAX(c) from table
+  const int tuple_count = TESTS_TUPLES_PER_TILEGROUP;
+
+  // Create a table and wrap it in logical tiles
+  auto& txn_manager = concurrency::TransactionManagerFactory::GetInstance();
+  auto txn = txn_manager.BeginTransaction();
+
+  std::unique_ptr<storage::DataTable> data_table(
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+                                   false, false, txn);
+  txn_manager.CommitTransaction(txn);
+
+  std::unique_ptr<executor::LogicalTile> source_logical_tile1(
+      executor::LogicalTileFactory::WrapTileGroup(data_table->GetTileGroup(0)));
+
+  std::unique_ptr<executor::LogicalTile> source_logical_tile2(
+      executor::LogicalTileFactory::WrapTileGroup(data_table->GetTileGroup(1)));
+
+  // (1-5) Setup plan node
+
+  // 1) Set up group-by columns
+  std::vector<oid_t> group_by_columns;
+
+  // 2) Set up project info
+  DirectMapList direct_map_list = {
+      {0, {1, 0}}, {1, {1, 1}}, {2, {1, 2}}, {3, {1, 3}}};
+
+  std::unique_ptr<const planner::ProjectInfo> proj_info(
+      new planner::ProjectInfo(TargetList(), std::move(direct_map_list)));
+
+  // 3) Set up unique aggregates
+  std::vector<planner::AggregatePlan::AggTerm> agg_terms;
+  planner::AggregatePlan::AggTerm minB(
+      ExpressionType::AGGREGATE_MIN,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
+      false);
+  planner::AggregatePlan::AggTerm maxB(
+      ExpressionType::AGGREGATE_MAX,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
+      false);
+  planner::AggregatePlan::AggTerm minC(
+      ExpressionType::AGGREGATE_MIN,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::DECIMAL, 0,
+                                                    2),
+      false);
+  planner::AggregatePlan::AggTerm maxC(
+      ExpressionType::AGGREGATE_MAX,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::DECIMAL, 0,
+                                                    2),
+      false);
+  agg_terms.push_back(minB);
+  agg_terms.push_back(maxB);
+  agg_terms.push_back(minC);
+  agg_terms.push_back(maxC);
+
+  // 4) Set up predicate (empty)
+  std::unique_ptr<const expression::AbstractExpression> predicate(nullptr);
+
+  // 5) Create output table schema
+  auto data_table_schema = data_table.get()->GetSchema();
+  std::vector<oid_t> set = {1, 1, 2, 2};
+  std::vector<catalog::Column> columns;
+  for (auto column_index : set) {
+    columns.push_back(data_table_schema->GetColumn(column_index));
+  }
+  std::shared_ptr<const catalog::Schema> output_table_schema(
+      new catalog::Schema(columns));
+
+  // OK) Create the plan node
+  planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
+                              std::move(agg_terms), std::move(group_by_columns),
+                              output_table_schema, AggregateType::PLAIN);
+
+  // Create and set up executor
+  txn = txn_manager.BeginTransaction();
+  std::unique_ptr<executor::ExecutorContext> context(
+      new executor::ExecutorContext(txn));
+
+  executor::AggregateExecutor executor(&node, context.get());
+  MockExecutor child_executor;
+  executor.AddChild(&child_executor);
+
+  EXPECT_CALL(child_executor, DInit()).WillOnce(Return(true));
+
+  EXPECT_CALL(child_executor, DExecute())
+      .WillOnce(Return(true))
+      .WillOnce(Return(true))
+      .WillOnce(Return(false));
+
+  EXPECT_CALL(child_executor, GetOutput())
+      .WillOnce(Return(source_logical_tile1.release()))
+      .WillOnce(Return(source_logical_tile2.release()));
+
+  EXPECT_TRUE(executor.Init());
+
+  EXPECT_TRUE(executor.Execute());
+
+  txn_manager.CommitTransaction(txn);
+
+  // Verify result
+  std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
+  EXPECT_TRUE(result_tile.get() != nullptr);
+  type::Value val = (result_tile->GetValue(0, 0));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(1)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(91)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 2));
+  cmp = (val.CompareEquals(type::ValueFactory::GetDecimalValue(2)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 3));
+  cmp = (val.CompareEquals(type::ValueFactory::GetDecimalValue(92)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 }
 
 TEST_F(AggregateTests, HashDistinctTest) {
-  
   // SELECT d, a, b, c FROM table GROUP BY a, b, c, d;
   const int tuple_count = TESTS_TUPLES_PER_TILEGROUP;
 
@@ -353,10 +474,9 @@ TEST_F(AggregateTests, HashDistinctTest) {
   auto& txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
-                                   true,
-                                   true, 
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+                                   true, true,
                                    txn);  // let it be random
   txn_manager.CommitTransaction(txn);
 
@@ -397,7 +517,7 @@ TEST_F(AggregateTests, HashDistinctTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_HASH);
+                              output_table_schema, AggregateType::HASH);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -428,8 +548,9 @@ TEST_F(AggregateTests, HashDistinctTest) {
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
 
-  //for (auto tuple_id : *result_tile) {
-  //  int colA = common::ValuePeeker::PeekInteger(result_tile->GetValue(tuple_id, 1));
+  // for (auto tuple_id : *result_tile) {
+  //  int colA =
+  //  type::ValuePeeker::PeekInteger(result_tile->GetValue(tuple_id, 1));
   //  (void)colA;
   //}
 }
@@ -442,8 +563,8 @@ TEST_F(AggregateTests, HashSumGroupByTest) {
   auto& txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    true, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -467,8 +588,9 @@ TEST_F(AggregateTests, HashSumGroupByTest) {
   // 3) Set up unique aggregates
   std::vector<planner::AggregatePlan::AggTerm> agg_terms;
   planner::AggregatePlan::AggTerm sumC(
-      EXPRESSION_TYPE_AGGREGATE_SUM,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::DECIMAL, 0, 2));
+      ExpressionType::AGGREGATE_SUM,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::DECIMAL, 0,
+                                                    2));
   agg_terms.push_back(sumC);
 
   // 4) Set up predicate (empty)
@@ -487,7 +609,7 @@ TEST_F(AggregateTests, HashSumGroupByTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_HASH);
+                              output_table_schema, AggregateType::HASH);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -517,7 +639,7 @@ TEST_F(AggregateTests, HashSumGroupByTest) {
 
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
-  // FIXME This should pass 
+  // FIXME This should pass
   //  EXPECT_GE(3, result_tile->GetTupleCount());
 }
 
@@ -530,8 +652,8 @@ TEST_F(AggregateTests, HashCountDistinctGroupByTest) {
   auto txn = txn_manager.BeginTransaction();
 
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    true, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -555,12 +677,14 @@ TEST_F(AggregateTests, HashCountDistinctGroupByTest) {
   // 3) Set up unique aggregates
   std::vector<planner::AggregatePlan::AggTerm> agg_terms;
   planner::AggregatePlan::AggTerm countB(
-      EXPRESSION_TYPE_AGGREGATE_COUNT,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1),
+      ExpressionType::AGGREGATE_COUNT,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
       false);  // Flag distinct
   planner::AggregatePlan::AggTerm countDistinctB(
-      EXPRESSION_TYPE_AGGREGATE_COUNT,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1),
+      ExpressionType::AGGREGATE_COUNT,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
       true);  // Flag distinct
   agg_terms.push_back(countB);
   agg_terms.push_back(countDistinctB);
@@ -581,7 +705,7 @@ TEST_F(AggregateTests, HashCountDistinctGroupByTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_HASH);
+                              output_table_schema, AggregateType::HASH);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -612,20 +736,20 @@ TEST_F(AggregateTests, HashCountDistinctGroupByTest) {
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
-  std::unique_ptr<common::Value> val(result_tile->GetValue(0, 0));
-  std::unique_ptr<common::Value> cmp(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(0)));
-  std::unique_ptr<common::Value> cmp1(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(10)));
-  EXPECT_TRUE(cmp->IsTrue() || cmp1->IsTrue());
+  type::Value val = (result_tile->GetValue(0, 0));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(0)));
+  type::CmpBool cmp1 =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(10)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE || cmp1 == type::CMP_TRUE);
 
-  val.reset(result_tile->GetValue(0, 1));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(5)));
-  EXPECT_TRUE(cmp->IsTrue());
+  val = (result_tile->GetValue(0, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(5)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 
-  val.reset(result_tile->GetValue(0, 2));
-  cmp.reset(val->CompareLessThanEquals(common::ValueFactory::GetIntegerValue(3)));
-  EXPECT_TRUE(cmp->IsTrue());
+  val = (result_tile->GetValue(0, 2));
+  cmp = (val.CompareLessThanEquals(type::ValueFactory::GetIntegerValue(3)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 }
 
 TEST_F(AggregateTests, PlainSumCountDistinctTest) {
@@ -637,8 +761,8 @@ TEST_F(AggregateTests, PlainSumCountDistinctTest) {
   auto txn = txn_manager.BeginTransaction();
 
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), 2 * tuple_count, false,
                                    true, true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -662,16 +786,19 @@ TEST_F(AggregateTests, PlainSumCountDistinctTest) {
   // 3) Set up unique aggregates
   std::vector<planner::AggregatePlan::AggTerm> agg_terms;
   planner::AggregatePlan::AggTerm sumA(
-      EXPRESSION_TYPE_AGGREGATE_SUM,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 0),
+      ExpressionType::AGGREGATE_SUM,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    0),
       false);
   planner::AggregatePlan::AggTerm countB(
-      EXPRESSION_TYPE_AGGREGATE_COUNT,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1),
+      ExpressionType::AGGREGATE_COUNT,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
       false);  // Flag distinct
   planner::AggregatePlan::AggTerm countDistinctB(
-      EXPRESSION_TYPE_AGGREGATE_COUNT,
-      expression::ExpressionUtil::TupleValueFactory(common::Type::INTEGER, 0, 1),
+      ExpressionType::AGGREGATE_COUNT,
+      expression::ExpressionUtil::TupleValueFactory(type::TypeId::INTEGER, 0,
+                                                    1),
       true);  // Flag distinct
   agg_terms.push_back(sumA);
   agg_terms.push_back(countB);
@@ -693,7 +820,7 @@ TEST_F(AggregateTests, PlainSumCountDistinctTest) {
   // OK) Create the plan node
   planner::AggregatePlan node(std::move(proj_info), std::move(predicate),
                               std::move(agg_terms), std::move(group_by_columns),
-                              output_table_schema, AGGREGATE_TYPE_PLAIN);
+                              output_table_schema, AggregateType::PLAIN);
 
   // Create and set up executor
   txn = txn_manager.BeginTransaction();
@@ -724,16 +851,16 @@ TEST_F(AggregateTests, PlainSumCountDistinctTest) {
   // Verify result
   std::unique_ptr<executor::LogicalTile> result_tile(executor.GetOutput());
   EXPECT_TRUE(result_tile.get() != nullptr);
-  std::shared_ptr<common::Value> val(result_tile->GetValue(0, 0));
-  std::shared_ptr<common::Value> cmp(
-      val->CompareEquals(common::ValueFactory::GetIntegerValue(50)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 1));
-  cmp.reset(val->CompareEquals(common::ValueFactory::GetIntegerValue(10)));
-  EXPECT_TRUE(cmp->IsTrue());
-  val.reset(result_tile->GetValue(0, 2));
-  cmp.reset(val->CompareLessThanEquals(common::ValueFactory::GetIntegerValue(3)));
-  EXPECT_TRUE(cmp->IsTrue());
+  type::Value val = (result_tile->GetValue(0, 0));
+  type::CmpBool cmp =
+      (val.CompareEquals(type::ValueFactory::GetIntegerValue(50)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 1));
+  cmp = (val.CompareEquals(type::ValueFactory::GetIntegerValue(10)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
+  val = (result_tile->GetValue(0, 2));
+  cmp = (val.CompareLessThanEquals(type::ValueFactory::GetIntegerValue(3)));
+  EXPECT_TRUE(cmp == type::CMP_TRUE);
 }
 
 }  // namespace test

@@ -11,9 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "parser/parser_utils.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "common/logger.h"
 #include "common/macros.h"
+#include "expression/tuple_value_expression.h"
 
 #include <stdio.h>
 #include <string>
@@ -25,7 +26,6 @@ namespace parser {
 std::string indent(uint num_indent) { return std::string(num_indent, '\t'); }
 
 void inprint(UNUSED_ATTRIBUTE int64_t val, UNUSED_ATTRIBUTE uint num_indent) {
-  // indent(num_indent)
   LOG_TRACE("%lu", val);
 }
 
@@ -33,11 +33,14 @@ void inprint(UNUSED_ATTRIBUTE float val, UNUSED_ATTRIBUTE uint num_indent) {
   LOG_TRACE("%f", val);
 }
 
-void inprint(UNUSED_ATTRIBUTE const char* val, UNUSED_ATTRIBUTE uint num_indent) {
+void inprint(UNUSED_ATTRIBUTE const char* val,
+             UNUSED_ATTRIBUTE uint num_indent) {
   LOG_TRACE("%s", val);
 }
 
-void inprint(UNUSED_ATTRIBUTE const char* val, UNUSED_ATTRIBUTE const char* val2, UNUSED_ATTRIBUTE uint num_indent) {
+void inprint(UNUSED_ATTRIBUTE const char* val,
+             UNUSED_ATTRIBUTE const char* val2,
+             UNUSED_ATTRIBUTE uint num_indent) {
   LOG_TRACE("%s -> %s", val, val2);
 }
 
@@ -51,15 +54,15 @@ void inprintU(UNUSED_ATTRIBUTE uint64_t val, UNUSED_ATTRIBUTE uint num_indent) {
 
 void PrintTableRefInfo(TableRef* table, UNUSED_ATTRIBUTE uint num_indent) {
   switch (table->type) {
-    case TABLE_REFERENCE_TYPE_NAME:
+    case TableReferenceType::NAME:
       inprint(table->GetTableName(), num_indent);
       break;
 
-    case TABLE_REFERENCE_TYPE_SELECT:
+    case TableReferenceType::SELECT:
       GetSelectStatementInfo(table->select, num_indent);
       break;
 
-    case TABLE_REFERENCE_TYPE_JOIN:
+    case TableReferenceType::JOIN:
       inprint("-> Join Table", num_indent);
       inprint("-> Left", num_indent + 1);
       PrintTableRefInfo(table->join->left, num_indent + 2);
@@ -69,11 +72,11 @@ void PrintTableRefInfo(TableRef* table, UNUSED_ATTRIBUTE uint num_indent) {
       GetExpressionInfo(table->join->condition, num_indent + 2);
       break;
 
-    case TABLE_REFERENCE_TYPE_CROSS_PRODUCT:
+    case TableReferenceType::CROSS_PRODUCT:
       for (TableRef* tbl : *table->list) PrintTableRefInfo(tbl, num_indent);
       break;
 
-    case TABLE_REFERENCE_TYPE_INVALID:
+    case TableReferenceType::INVALID:
     default:
       LOG_ERROR("invalid table ref type");
       break;
@@ -92,9 +95,9 @@ void PrintOperatorExpression(const expression::AbstractExpression* expr,
     return;
   }
 
-  GetExpressionInfo(expr->GetLeft(), num_indent + 1);
-  if (expr->GetRight() != NULL)
-    GetExpressionInfo(expr->GetRight(), num_indent + 1);
+  GetExpressionInfo(expr->GetChild(0), num_indent + 1);
+  if (expr->GetChild(1) != NULL)
+    GetExpressionInfo(expr->GetChild(1), num_indent + 1);
 }
 
 void GetExpressionInfo(const expression::AbstractExpression* expr,
@@ -104,27 +107,31 @@ void GetExpressionInfo(const expression::AbstractExpression* expr,
     return;
   }
 
-  LOG_TRACE("-> Expr Type :: %s", ExpressionTypeToString(expr->GetExpressionType()).c_str());
+  LOG_TRACE("-> Expr Type :: %s",
+            ExpressionTypeToString(expr->GetExpressionType()).c_str());
 
   switch (expr->GetExpressionType()) {
-    case EXPRESSION_TYPE_STAR:
+    case ExpressionType::STAR:
       inprint("*", num_indent);
       break;
-    case EXPRESSION_TYPE_COLUMN_REF:
-      // TODO: Fix this
-      inprint((expr)->GetName(), num_indent);
-      //if (expr->GetColumn() != NULL) inprint((expr)->GetColumn(), num_indent);
+    case ExpressionType::VALUE_TUPLE:
+      inprint((expr)->GetInfo().data(), num_indent);
+      inprint(((expression::TupleValueExpression*)expr)->GetTableName().data(),
+              num_indent);
+      inprint(((expression::TupleValueExpression*)expr)->GetColumnName().data(),
+              num_indent);
       break;
-    case EXPRESSION_TYPE_VALUE_CONSTANT:
-      // TODO: Fix this
-      // ((expression::ConstantValueExpression*)expr)->Evaluate(nullptr,
-      // nullptr, nullptr);
-      printf("\n");
+    case ExpressionType::COMPARE_GREATERTHAN:
+      inprint((expr)->GetInfo().data(), num_indent);
+      for (size_t i = 0; i < (expr)->GetChildrenSize(); ++i) {
+        inprint(((expr)->GetChild(i))->GetInfo().data(), num_indent);
+      }
       break;
-    case EXPRESSION_TYPE_FUNCTION_REF:
-      // TODO: Fix this
-      // inprint(expr->GetName(), num_indent);
-      // inprint(expr->GetExpression()->GetName(), num_indent);
+    case ExpressionType::VALUE_CONSTANT:
+      inprint((expr)->GetInfo().data(), num_indent);
+      break;
+    case ExpressionType::FUNCTION_REF:
+      inprint(expr->GetInfo().data(), num_indent);
       break;
     default:
       PrintOperatorExpression(expr, num_indent);
@@ -144,7 +151,9 @@ void GetSelectStatementInfo(SelectStatement* stmt, uint num_indent) {
     GetExpressionInfo(expr, num_indent + 2);
 
   inprint("-> Sources:", num_indent + 1);
-  PrintTableRefInfo(stmt->from_table, num_indent + 2);
+  if (stmt->from_table != NULL) {
+    PrintTableRefInfo(stmt->from_table, num_indent + 2);
+  }
 
   if (stmt->where_clause != NULL) {
     inprint("-> Search Conditions:", num_indent + 1);
@@ -158,11 +167,25 @@ void GetSelectStatementInfo(SelectStatement* stmt, uint num_indent) {
 
   if (stmt->order != NULL) {
     inprint("-> OrderBy:", num_indent + 1);
-    GetExpressionInfo(stmt->order->expr, num_indent + 2);
-    if (stmt->order->type == kOrderAsc)
-      inprint("ascending", num_indent + 2);
-    else
-      inprint("descending", num_indent + 2);
+    for (size_t idx = 0; idx < stmt->order->exprs->size(); idx++) {
+      auto expr = stmt->order->exprs->at(idx);
+      auto type = stmt->order->types->at(idx);
+      GetExpressionInfo(expr, num_indent + 2);
+      if (type == kOrderAsc)
+        inprint("ascending", num_indent + 2);
+      else
+        inprint("descending", num_indent + 2);
+    }
+  }
+
+  if (stmt->group_by != NULL) {
+    inprint("-> GroupBy:", num_indent + 1);
+    for (auto column : *(stmt->group_by->columns)) {
+      inprint(column->GetInfo().data(), num_indent + 2);
+    }
+    if (stmt->group_by->having) {
+      inprint(stmt->group_by->having->GetInfo().data(), num_indent + 2);
+    }
   }
 
   if (stmt->limit != NULL) {
@@ -221,13 +244,16 @@ void GetInsertStatementInfo(InsertStatement* stmt, uint num_indent) {
     }
   }
   switch (stmt->type) {
-    case INSERT_TYPE_VALUES:
+    case InsertType::VALUES:
       inprint("-> Values", num_indent + 1);
-      for (expression::AbstractExpression* expr : *stmt->values) {
-        GetExpressionInfo(expr, num_indent + 2);
+      for (auto value_item : *stmt->insert_values) {
+        // TODO this is a debugging method which is currently unused.
+        for (expression::AbstractExpression* expr : *value_item) {
+          GetExpressionInfo(expr, num_indent + 2);
+        }
       }
       break;
-    case INSERT_TYPE_SELECT:
+    case InsertType::SELECT:
       GetSelectStatementInfo(stmt->select, num_indent + 1);
       break;
     default:
@@ -235,5 +261,23 @@ void GetInsertStatementInfo(InsertStatement* stmt, uint num_indent) {
   }
 }
 
-}  // End parser namespace
-}  // End peloton namespace
+void GetDeleteStatementInfo(DeleteStatement* stmt, uint num_indent) {
+  inprint("InsertStatment", num_indent);
+  inprint(stmt->GetTableName().c_str(), num_indent + 1);
+  return;
+}
+
+std::string CharsToStringDestructive(char* str) {
+  // this should not make an extra copy because of the return value optimization
+  // ..hopefully
+  if (str == nullptr) {
+    return "";
+  } else {
+    std::string ret_string(str);
+    delete str;
+    return ret_string;
+  }
+}
+
+}  // namespace parser
+}  // namespace peloton

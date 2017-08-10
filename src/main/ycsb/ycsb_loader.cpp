@@ -38,7 +38,7 @@
 #include "storage/database.h"
 
 // Logging mode
-extern LoggingType peloton_logging_mode;
+// extern peloton::LoggingType peloton_logging_mode;
 
 namespace peloton {
 namespace benchmark {
@@ -50,7 +50,7 @@ storage::DataTable *user_table = nullptr;
 
 void CreateYCSBDatabase() {
   const oid_t col_count = state.column_count + 1;
-  const bool is_inlined = true;
+  const bool is_inlined = false;
 
   /////////////////////////////////////////////////////////
   // Create tables
@@ -70,15 +70,24 @@ void CreateYCSBDatabase() {
   std::vector<catalog::Column> columns;
 
   auto column =
-      catalog::Column(common::Type::INTEGER, common::Type::GetTypeSize(common::Type::INTEGER),
+      catalog::Column(type::TypeId::INTEGER, type::Type::GetTypeSize(type::TypeId::INTEGER),
                       "YCSB_KEY", is_inlined);
   columns.push_back(column);
 
-  for (oid_t col_itr = 1; col_itr < col_count; col_itr++) {
-      auto column =
-          catalog::Column(common::Type::INTEGER, common::Type::GetTypeSize(common::Type::INTEGER),
-                          "FIELD" + std::to_string(col_itr), is_inlined);
-      columns.push_back(column);
+  if (state.string_mode == true) {
+    for (oid_t col_itr = 1; col_itr < col_count; col_itr++) {
+        auto column =
+            catalog::Column(type::TypeId::VARCHAR, 100,
+                            "FIELD" + std::to_string(col_itr), is_inlined);
+        columns.push_back(column);
+    }
+  } else {
+    for (oid_t col_itr = 1; col_itr < col_count; col_itr++) {
+        auto column =
+            catalog::Column(type::TypeId::INTEGER, type::Type::GetTypeSize(type::TypeId::INTEGER),
+                            "FIELD" + std::to_string(col_itr), is_inlined);
+        columns.push_back(column);
+    }
   }
 
   catalog::Schema *table_schema = new catalog::Schema(columns);
@@ -106,17 +115,16 @@ void CreateYCSBDatabase() {
 
   index_metadata = new index::IndexMetadata(
     "primary_index", user_table_pkey_index_oid, user_table_oid,
-    ycsb_database_oid, state.index, INDEX_CONSTRAINT_TYPE_PRIMARY_KEY,
+    ycsb_database_oid, state.index, IndexConstraintType::PRIMARY_KEY,
     tuple_schema, key_schema, key_attrs, unique);
 
   std::shared_ptr<index::Index> pkey_index(
-      index::IndexFactory::GetInstance(index_metadata));
+      index::IndexFactory::GetIndex(index_metadata));
   user_table->AddIndex(pkey_index);
 }
 
-void LoadYCSBDatabase() {
+void LoadYCSBRows(const int begin_rowid, const int end_rowid) {
   const oid_t col_count = state.column_count + 1;
-  const int tuple_count = state.scale_factor * DEFAULT_TUPLES_PER_TILEGROUP;
 
   // Pick the user table
   auto table_schema = user_table->GetSchema();
@@ -125,6 +133,8 @@ void LoadYCSBDatabase() {
   // Load in the data
   /////////////////////////////////////////////////////////
 
+  std::unique_ptr<type::AbstractPool> pool(new type::EphemeralPool());
+
   // Insert tuples into tile_group.
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   const bool allocate = true;
@@ -132,14 +142,24 @@ void LoadYCSBDatabase() {
   std::unique_ptr<executor::ExecutorContext> context(
       new executor::ExecutorContext(txn));
 
-  int rowid;
-  for (rowid = 0; rowid < tuple_count; rowid++) {
+  for (int rowid = begin_rowid; rowid < end_rowid; rowid++) {
     std::unique_ptr<storage::Tuple> tuple(
         new storage::Tuple(table_schema, allocate));
-    auto key_value = common::ValueFactory::GetIntegerValue(rowid);
 
-    for (oid_t col_itr = 0; col_itr < col_count; col_itr++) {
-      tuple->SetValue(col_itr, key_value, nullptr);
+    auto primary_key_value = type::ValueFactory::GetIntegerValue(rowid);
+    tuple->SetValue(0, primary_key_value, nullptr);
+
+
+    if (state.string_mode == true) {
+      auto key_value = type::ValueFactory::GetVarcharValue(std::string(100, 'z'));
+      for (oid_t col_itr = 1; col_itr < col_count; col_itr++) {
+        tuple->SetValue(col_itr, key_value, pool.get());
+      }
+    } else {
+      auto key_value = type::ValueFactory::GetIntegerValue(rowid);
+      for (oid_t col_itr = 1; col_itr < col_count; col_itr++) {
+        tuple->SetValue(col_itr, key_value, nullptr);
+      }
     }
 
     planner::InsertPlan node(user_table, std::move(tuple));
@@ -148,6 +168,40 @@ void LoadYCSBDatabase() {
   }
 
   txn_manager.CommitTransaction(txn);
+}
+
+void LoadYCSBDatabase() {
+
+  std::chrono::steady_clock::time_point start_time;
+  start_time = std::chrono::steady_clock::now();
+
+  const int tuple_count = state.scale_factor * 1000;
+  int row_per_thread = tuple_count / state.loader_count;
+  
+  std::vector<std::unique_ptr<std::thread>> load_threads(state.loader_count);
+
+  for (int thread_id = 0; thread_id < state.loader_count - 1; ++thread_id) {
+    int begin_rowid = row_per_thread * thread_id;
+    int end_rowid = row_per_thread * (thread_id + 1);
+    load_threads[thread_id].reset(new std::thread(LoadYCSBRows, begin_rowid, end_rowid));
+  }
+  
+  int thread_id = state.loader_count - 1;
+  int begin_rowid = row_per_thread * thread_id;
+  int end_rowid = tuple_count;
+  load_threads[thread_id].reset(new std::thread(LoadYCSBRows, begin_rowid, end_rowid));
+
+  for (int thread_id = 0; thread_id < state.loader_count; ++thread_id) {
+    load_threads[thread_id]->join();
+  }
+
+  std::chrono::steady_clock::time_point end_time = std::chrono::steady_clock::now();
+  double diff = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+  LOG_INFO("database table loading time = %lf ms", diff);
+
+  LOG_INFO("============TABLE SIZES==========");
+  LOG_INFO("user count = %lu", user_table->GetTupleCount());
+
 }
 
 }  // namespace ycsb

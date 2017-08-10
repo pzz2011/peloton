@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "abstract_join_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "expression/abstract_expression.h"
 #include "planner/project_info.h"
 
@@ -43,13 +43,8 @@ class MergeJoinPlan : public AbstractJoinPlan {
     bool reversed_;
   };
 
-  MergeJoinPlan(const MergeJoinPlan &) = delete;
-  MergeJoinPlan &operator=(const MergeJoinPlan &) = delete;
-  MergeJoinPlan(MergeJoinPlan &&) = delete;
-  MergeJoinPlan &operator=(MergeJoinPlan &&) = delete;
-
   MergeJoinPlan(
-      PelotonJoinType join_type,
+      JoinType join_type,
       std::unique_ptr<const expression::AbstractExpression> &&predicate,
       std::unique_ptr<const ProjectInfo> &&proj_info,
       std::shared_ptr<const catalog::Schema> &proj_schema,
@@ -60,17 +55,26 @@ class MergeJoinPlan : public AbstractJoinPlan {
     // Nothing to see here...
   }
 
-  inline PlanNodeType GetPlanNodeType() const {
-    return PLAN_NODE_TYPE_MERGEJOIN;
+  void HandleSubplanBinding(bool from_left,
+                            const BindingContext &input) override {
+    for (auto &join_clause : *GetJoinClauses()) {
+      auto &exp = from_left ? join_clause.left_ : join_clause.right_;
+      const_cast<expression::AbstractExpression *>(exp.get())
+          ->PerformBinding({&input});
+    }
+  }
+
+  inline PlanNodeType GetPlanNodeType() const override {
+    return PlanNodeType::MERGEJOIN;
   }
 
   const std::vector<JoinClause> *GetJoinClauses() const {
     return &join_clauses_;
   }
 
-  const std::string GetInfo() const { return "MergeJoin"; }
+  const std::string GetInfo() const override { return "MergeJoin"; }
 
-  std::unique_ptr<AbstractPlan> Copy() const {
+  std::unique_ptr<AbstractPlan> Copy() const override {
     std::vector<JoinClause> new_join_clauses;
     for (size_t i = 0; i < join_clauses_.size(); i++) {
       new_join_clauses.push_back(JoinClause(join_clauses_[i].left_->Copy(),
@@ -84,12 +88,15 @@ class MergeJoinPlan : public AbstractJoinPlan {
         catalog::Schema::CopySchema(GetSchema()));
     MergeJoinPlan *new_plan = new MergeJoinPlan(
         GetJoinType(), std::move(predicate_copy),
-        std::move(GetProjInfo()->Copy()), schema_copy, new_join_clauses);
+        GetProjInfo()->Copy(), schema_copy, new_join_clauses);
     return std::unique_ptr<AbstractPlan>(new_plan);
   }
 
  private:
   std::vector<JoinClause> join_clauses_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(MergeJoinPlan);
 };
 
 }  // namespace planner

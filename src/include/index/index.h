@@ -12,18 +12,19 @@
 
 #pragma once
 
-#include <vector>
-#include <string>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <set>
-#include <atomic>
+#include <string>
+#include <vector>
 
-#include "common/printable.h"
-#include "common/types.h"
+#include "common/item_pointer.h"
 #include "common/logger.h"
-#include "common/varlen_pool.h"
-#include "common/value.h"
+#include "common/printable.h"
+#include "type/abstract_pool.h"
+#include "type/types.h"
+#include "type/value.h"
 
 namespace peloton {
 
@@ -58,15 +59,15 @@ class IndexMetadata : public Printable {
 
  public:
   IndexMetadata(std::string index_name, oid_t index_oid, oid_t table_oid,
-                oid_t database_oid, IndexType method_type,
-                IndexConstraintType index_type,
+                oid_t database_oid, IndexType index_type,
+                IndexConstraintType index_constraint_type,
                 const catalog::Schema *tuple_schema,
                 const catalog::Schema *key_schema,
                 const std::vector<oid_t> &key_attrs, bool unique_keys);
 
   ~IndexMetadata();
 
-  const std::string &GetName() const { return index_name; }
+  const std::string &GetName() const { return name_; }
 
   inline oid_t GetOid() { return index_oid; }
 
@@ -74,16 +75,24 @@ class IndexMetadata : public Printable {
 
   inline oid_t GetDatabaseOid() { return database_oid; }
 
-  IndexType GetIndexMethodType() { return method_type; }
+  inline IndexType GetIndexType() { return index_type_; }
 
-  IndexConstraintType GetIndexType() { return index_type; }
+  IndexConstraintType GetIndexConstraintType() {
+    return index_constraint_type_;
+  }
 
   /*
-   * GetKeySchama() - Returns a schema object pointer that represents
-   *                  the schema of indexed columns, from leading column
-   *                  to the least important columns
+   * Returns a schema object pointer that represents
+   * the schema of indexed columns, from leading column
+   * to the least important columns
    */
   inline const catalog::Schema *GetKeySchema() const { return key_schema; }
+
+  /*
+   * Returns a schema object pointer that represents
+   * the schema of the underlying table
+   */
+  inline const catalog::Schema *GetTupleSchema() const { return tuple_schema; }
 
   // Return the number of columns inside index key (not in tuple key)
   //
@@ -112,28 +121,45 @@ class IndexMetadata : public Printable {
     return tuple_attrs;
   }
 
-  double GetUtility() const { return utility_ratio; }
+  inline double GetUtility() const { return utility_ratio; }
 
-  void SetUtility(double p_utility_ratio) { utility_ratio = p_utility_ratio; }
+  inline void SetUtility(double p_utility_ratio) {
+    utility_ratio = p_utility_ratio;
+  }
+
+  inline bool GetVisibility() const { return (visible_); }
+
+  inline void SetVisibility(bool visibile) { visible_ = visibile; }
 
   /*
    * GetInfo() - Get a string representation for debugging
    */
   const std::string GetInfo() const;
 
+  //===--------------------------------------------------------------------===//
+  // STATIC HELPERS
+  //===--------------------------------------------------------------------===//
+
+  static inline void SetDefaultVisibleFlag(bool flag) {
+    LOG_DEBUG("Set IndexMetadata visible flag to '%s'",
+              (flag ? "true" : "false"));
+    index_default_visibility = flag;
+  }
+
   ///////////////////////////////////////////////////////////////////
   // IndexMetadata Data Member Definition
   ///////////////////////////////////////////////////////////////////
 
-  std::string index_name;
+  // deprecated, use catalog::IndexCatalog::GetInstance()->GetIndexName()
+  std::string name_;
 
-  oid_t index_oid;
-  oid_t table_oid;
-  oid_t database_oid;
+  const oid_t index_oid;
+  const oid_t table_oid;
+  const oid_t database_oid;
 
-  IndexType method_type;
+  const IndexType index_type_;
 
-  IndexConstraintType index_type;
+  const IndexConstraintType index_constraint_type_;
 
   // schema of the indexed base table
   const catalog::Schema *tuple_schema;
@@ -142,8 +168,9 @@ class IndexMetadata : public Printable {
   // of the underlying table schema
   const catalog::Schema *key_schema;
 
+ private:
   // The mapping relation between key schema and tuple schema
-  std::vector<oid_t> key_attrs;
+  const std::vector<oid_t> key_attrs;
 
   // The mapping relation between tuple schema and key schema
   // i.e. if the column in tuple is not indexed, then it is set to INVALID_OID
@@ -153,10 +180,16 @@ class IndexMetadata : public Printable {
   std::vector<oid_t> tuple_attrs;
 
   // Whether keys are unique (e.g. primary key)
-  bool unique_keys;
+  const bool unique_keys;
 
   // utility of an index
   double utility_ratio = INVALID_RATIO;
+
+  // If set to true, then this index is visible to the planner
+  bool visible_;
+
+  // This is a magic flag that tells us whether new
+  static bool index_default_visibility;
 };
 
 /////////////////////////////////////////////////////////////////////
@@ -190,7 +223,11 @@ class Index : public Printable {
    */
   oid_t GetOid() const { return index_oid; }
 
+  // Return the metadata object associated with the index
   IndexMetadata *GetMetadata() const { return metadata; }
+
+  // Convert table column ID to index column ID
+  oid_t TupleColumnToKeyColumn(oid_t tuple_column_id) const;
 
   virtual ~Index();
 
@@ -211,25 +248,32 @@ class Index : public Printable {
   // If not any of those k-v pair satisfy the predicate, insert the k-v pair
   // into the index and return true.
   // This function should be called for all primary/unique index insert
-  virtual bool CondInsertEntry(
-      const storage::Tuple *key, ItemPointer *location,
-      std::function<bool(const void *)> predicate) = 0;
+  virtual bool CondInsertEntry(const storage::Tuple *key, ItemPointer *location,
+                               std::function<bool(const void *)> predicate) = 0;
 
   ///////////////////////////////////////////////////////////////////
   // Index Scan
   ///////////////////////////////////////////////////////////////////
 
-  virtual void Scan(const std::vector<common::Value *> &value_list,
+  virtual void Scan(const std::vector<type::Value> &value_list,
                     const std::vector<oid_t> &tuple_column_id_list,
                     const std::vector<ExpressionType> &expr_list,
-                    const ScanDirectionType &scan_direction,
+                    ScanDirectionType scan_direction,
                     std::vector<ItemPointer *> &result,
                     const ConjunctionScanPredicate *csp_p) = 0;
+
+  virtual void ScanLimit(const std::vector<type::Value> &value_list,
+                         const std::vector<oid_t> &tuple_column_id_list,
+                         const std::vector<ExpressionType> &expr_list,
+                         ScanDirectionType scan_direction,
+                         std::vector<ItemPointer *> &result,
+                         const ConjunctionScanPredicate *csp_p, uint64_t limit,
+                         uint64_t offset) = 0;
 
   // This is the version used to test scan
   // Since it does scan planning everytime, it is slow, and should
   // only be used for correctness testing
-  virtual void ScanTest(const std::vector<common::Value *> &value_list,
+  virtual void ScanTest(const std::vector<type::Value> &value_list,
                         const std::vector<oid_t> &tuple_column_id_list,
                         const std::vector<ExpressionType> &expr_list,
                         const ScanDirectionType &scan_direction,
@@ -297,9 +341,11 @@ class Index : public Printable {
     return metadata->GetKeySchema();
   }
 
-  IndexType GetIndexMethodType() { return metadata->GetIndexMethodType(); }
+  IndexType GetIndexMethodType() { return metadata->GetIndexType(); }
 
-  IndexConstraintType GetIndexType() const { return metadata->GetIndexType(); }
+  IndexConstraintType GetIndexType() const {
+    return metadata->GetIndexConstraintType();
+  }
 
   // Get a string representation for debugging
   const std::string GetInfo() const;
@@ -310,12 +356,9 @@ class Index : public Printable {
   bool Compare(const AbstractTuple &index_key,
                const std::vector<oid_t> &column_ids,
                const std::vector<ExpressionType> &expr_types,
-               const std::vector<common::Value *> &values);
+               const std::vector<type::Value> &values);
 
-  common::VarlenPool *GetPool() const { return pool; }
-
-  // Garbage collect
-  virtual bool Cleanup() = 0;
+  type::AbstractPool *GetPool() const { return pool; }
 
   // Get the memory footprint
   virtual size_t GetMemoryFootprint() = 0;
@@ -333,12 +376,6 @@ class Index : public Printable {
 
  protected:
   Index(IndexMetadata *schema);
-
-  // Set the lower bound tuple for index iteration
-  bool ConstructLowerBoundTuple(storage::Tuple *index_key,
-                                const std::vector<common::Value*> &values,
-                                const std::vector<oid_t> &key_column_ids,
-                                const std::vector<ExpressionType> &expr_types);
 
   //===--------------------------------------------------------------------===//
   //  Data members
@@ -361,11 +398,11 @@ class Index : public Printable {
   bool dirty = false;
 
   // pool
-  common::VarlenPool *pool = nullptr;
+  type::AbstractPool *pool = nullptr;
 
   // This is used by index tuner
   std::atomic<size_t> indexed_tile_group_offset;
 };
 
-}  // End index namespace
-}  // End peloton namespace
+}  // namespace index
+}  // namespace peloton

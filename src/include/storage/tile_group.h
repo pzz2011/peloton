@@ -10,26 +10,30 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <map>
 #include <atomic>
-#include <vector>
-#include <mutex>
+#include <map>
 #include <memory>
-#include <planner/project_info.h>
+#include <mutex>
+#include <vector>
 
-#include "common/types.h"
-#include "common/value.h"
+#include "common/item_pointer.h"
 #include "common/printable.h"
-#include "common/varlen_pool.h"
+#include "planner/project_info.h"
+#include "type/abstract_pool.h"
+#include "type/types.h"
+#include "type/value.h"
 
 namespace peloton {
 
 namespace catalog {
 class Manager;
 class Schema;
+}
+
+namespace gc {
+class GCManager;
 }
 
 namespace planner {
@@ -63,6 +67,7 @@ typedef std::map<oid_t, std::pair<oid_t, oid_t>> column_map_type;
 class TileGroup : public Printable {
   friend class Tile;
   friend class TileGroupFactory;
+  friend class gc::GCManager;
 
   TileGroup() = delete;
   TileGroup(TileGroup const &) = delete;
@@ -81,8 +86,6 @@ class TileGroup : public Printable {
 
   // copy tuple in place.
   void CopyTuple(const Tuple *tuple, const oid_t &tuple_slot_id);
-
-  void CopyTuple(const oid_t &tuple_slot_id, Tuple *tuple);
 
   // insert tuple at next available slot in tile if a slot exists
   oid_t InsertTuple(const Tuple *tuple);
@@ -127,20 +130,24 @@ class TileGroup : public Printable {
   unsigned int NumTiles() const { return tiles.size(); }
 
   // Get the tile at given offset in the tile group
-  Tile *GetTile(const oid_t tile_itr) const;
+  inline Tile *GetTile(const oid_t tile_offset) const {
+    PL_ASSERT(tile_offset < tile_count);
+    Tile *tile = tiles[tile_offset].get();
+    return tile;
+  }
 
   // Get a reference to the tile at the given offset in the tile group
   std::shared_ptr<Tile> GetTileReference(const oid_t tile_offset) const;
 
   oid_t GetTileId(const oid_t tile_id) const;
 
-  peloton::common::VarlenPool *GetTilePool(const oid_t tile_id) const;
+  peloton::type::AbstractPool *GetTilePool(const oid_t tile_id) const;
 
   const std::map<oid_t, std::pair<oid_t, oid_t>> &GetColumnMap() const {
     return column_map;
   }
 
-  oid_t GetTileGroupId() const { return tile_group_id; }
+  oid_t GetTileGroupId() const;
 
   oid_t GetDatabaseId() const { return database_id; }
 
@@ -154,16 +161,24 @@ class TileGroup : public Printable {
 
   size_t GetTileCount() const { return tile_count; }
 
-  void LocateTileAndColumn(oid_t column_offset, oid_t &tile_offset,
-                           oid_t &tile_column_offset);
+  // Sets the tile id and column id w.r.t that tile corresponding to
+  // the specified tile group column id.
+  inline void LocateTileAndColumn(oid_t column_offset, oid_t &tile_offset,
+                                  oid_t &tile_column_offset) const {
+    PL_ASSERT(column_map.count(column_offset) != 0);
+    // get the entry in the column map
+    auto entry = column_map.at(column_offset);
+    tile_offset = entry.first;
+    tile_column_offset = entry.second;
+  }
 
   oid_t GetTileIdFromColumnId(oid_t column_id);
 
   oid_t GetTileColumnId(oid_t column_id);
 
-  common::Value *GetValue(oid_t tuple_id, oid_t column_id);
+  type::Value GetValue(oid_t tuple_id, oid_t column_id);
 
-  void SetValue(common::Value &value, oid_t tuple_id, oid_t column_id);
+  void SetValue(type::Value &value, oid_t tuple_id, oid_t column_id);
 
   double GetSchemaDifference(const storage::column_map_type &new_column_map);
 
@@ -208,5 +223,5 @@ class TileGroup : public Printable {
   column_map_type column_map;
 };
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

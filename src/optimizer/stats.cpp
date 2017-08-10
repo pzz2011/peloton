@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #include "optimizer/stats.h"
 
 namespace peloton {
@@ -20,5 +19,5 @@ namespace optimizer {
 // Stats
 //===--------------------------------------------------------------------===//
 
-} /* namespace optimizer */
-} /* namespace peloton */
+}  // namespace optimizer
+}  // namespace peloton

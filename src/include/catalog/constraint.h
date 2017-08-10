@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "common/printable.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace catalog {
@@ -60,7 +60,7 @@ class Constraint : public Printable {
   //===--------------------------------------------------------------------===//
 
   // The type of constraint
-  ConstraintType constraint_type = CONSTRAINT_TYPE_INVALID;
+  ConstraintType constraint_type = ConstraintType::INVALID;
 
   // Offsets into the Unique index and reference table lists in Table
   oid_t fk_list_offset = INVALID_OID;
@@ -71,5 +71,5 @@ class Constraint : public Printable {
 
 };
 
-}  // End catalog namespace
-}  // End peloton namespace
+}  // namespace catalog
+}  // namespace peloton

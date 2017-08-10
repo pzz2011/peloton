@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include <memory>
@@ -18,7 +17,7 @@
 #include <vector>
 
 #include "abstract_plan.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "storage/tuple.h"
 
 namespace peloton {
@@ -31,11 +30,6 @@ namespace planner {
  */
 class ResultPlan : public AbstractPlan {
  public:
-  ResultPlan(const ResultPlan &) = delete;
-  ResultPlan &operator=(const ResultPlan &) = delete;
-  ResultPlan(ResultPlan &&) = delete;
-  ResultPlan &operator=(ResultPlan &&) = delete;
-
   ResultPlan(storage::Tuple *tuple, storage::Backend *backend)
       : tuple_(tuple), backend_(backend) {}
 
@@ -44,7 +38,7 @@ class ResultPlan : public AbstractPlan {
 
   storage::Backend *GetBackend() const { return backend_; }
 
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_RESULT; }
+  inline PlanNodeType GetPlanNodeType() const { return PlanNodeType::RESULT; }
 
   inline std::string GetInfo() const { return "Result"; }
 
@@ -60,7 +54,10 @@ class ResultPlan : public AbstractPlan {
    */
   storage::Backend *backend_;
   std::unique_ptr<storage::Tuple> tuple_;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(ResultPlan);
 };
 
-} /* namespace planner */
-} /* namespace peloton */
+}  // namespace planner
+}  // namespace peloton

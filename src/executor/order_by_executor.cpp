@@ -6,14 +6,13 @@
 //
 // Identification: src/executor/order_by_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
 #include <algorithm>
 
 #include "common/logger.h"
-#include "common/varlen_pool.h"
 #include "executor/logical_tile.h"
 #include "executor/logical_tile_factory.h"
 #include "executor/order_by_executor.h"
@@ -41,6 +40,21 @@ bool OrderByExecutor::DInit() {
   sort_done_ = false;
   num_tuples_returned_ = 0;
 
+  // Grab info from plan node and check it
+  const planner::OrderByPlan &node = GetPlanNode<planner::OrderByPlan>();
+
+  // copy from underlying plan
+  underling_ordered_ = node.GetUnderlyingOrder();
+
+  // Whether there is limit clause
+  limit_ = node.GetLimit();
+
+  // Copied from plan node
+  limit_number_ = node.GetLimitNumber();
+
+  // Copied from plan node
+  limit_offset_ = node.GetLimitOffset();
+
   return true;
 }
 
@@ -54,17 +68,18 @@ bool OrderByExecutor::DExecute() {
   }
 
   PL_ASSERT(sort_done_);
-  PL_ASSERT(input_schema_.get());
+  PL_ASSERT(output_schema_.get());
   PL_ASSERT(input_tiles_.size() > 0);
 
-  // Returned tiles must be newly created physical tiles,
-  // which have the same physical schema as input tiles.
+  // Returned tiles must be newly created physical tiles.
+  // NOTE: the schema of these tiles might not match the input tiles when some of the order by columns are not be part of the output schema
+
   size_t tile_size = std::min(size_t(DEFAULT_TUPLES_PER_TILEGROUP),
                               sort_buffer_.size() - num_tuples_returned_);
 
   std::shared_ptr<storage::Tile> ptile(storage::TileFactory::GetTile(
-      BACKEND_TYPE_MM, INVALID_OID, INVALID_OID, INVALID_OID, INVALID_OID,
-      nullptr, *input_schema_, nullptr, tile_size));
+      BackendType::MM, INVALID_OID, INVALID_OID, INVALID_OID, INVALID_OID,
+      nullptr, *output_schema_, nullptr, tile_size));
 
   for (size_t id = 0; id < tile_size; id++) {
     oid_t source_tile_id =
@@ -72,10 +87,10 @@ bool OrderByExecutor::DExecute() {
     oid_t source_tuple_id =
         sort_buffer_[num_tuples_returned_ + id].item_pointer.offset;
     // Insert a physical tuple into physical tile
-    for (oid_t col = 0; col < input_schema_->GetColumnCount(); col++) {
-      std::unique_ptr<common::Value> val(
-          input_tiles_[source_tile_id]->GetValue(source_tuple_id, col));
-      ptile.get()->SetValue(*val, id, col);
+    for (oid_t i = 0; i < output_schema_->GetColumnCount(); i++) {
+      type::Value val =
+          (input_tiles_[source_tile_id]->GetValue(source_tuple_id, output_column_ids_[i]));
+      ptile.get()->SetValue(val, id, i);
     }
   }
 
@@ -102,6 +117,19 @@ bool OrderByExecutor::DoSort() {
   // Extract all data from child
   while (children_[0]->Execute()) {
     input_tiles_.emplace_back(children_[0]->GetOutput());
+
+    // increase the counter
+    num_tuples_get_ += input_tiles_.back()->GetTupleCount();
+
+    // Optimization for ordered output
+    if (underling_ordered_ && limit_) {
+      LOG_TRACE("underling_ordered and limit both work");
+      // We already get enough tuples, break while
+      if (num_tuples_get_ >= (limit_offset_ + limit_number_)) {
+        LOG_TRACE("num_tuples_get_ (%lu) are enough", num_tuples_get_);
+        break;
+      }
+    }
   }
 
   /** Number of valid tuples to be sorted. */
@@ -117,13 +145,21 @@ bool OrderByExecutor::DoSort() {
   descend_flags_ = node.GetDescendFlags();
 
   // Extract the schema for sort keys.
-  input_schema_.reset(input_tiles_[0]->GetPhysicalSchema());
+
+  std::unique_ptr<catalog::Schema> physical_schema;
+  physical_schema.reset(input_tiles_[0]->GetPhysicalSchema());
   std::vector<catalog::Column> sort_key_columns;
+  std::vector<catalog::Column> output_key_columns;
   for (auto id : node.GetSortKeys()) {
-    sort_key_columns.push_back(input_schema_->GetColumn(id));
+    sort_key_columns.push_back(physical_schema->GetColumn(id));
   }
+  for (auto id : node.GetOutputColumnIds()) {
+    output_key_columns.push_back(physical_schema->GetColumn(id));
+  }
+  output_column_ids_ = node.GetOutputColumnIds();
   sort_key_tuple_schema_.reset(new catalog::Schema(sort_key_columns));
-  auto executor_pool = executor_context_->GetExecutorContextPool();
+  output_schema_.reset(new catalog::Schema(output_key_columns));
+  auto executor_pool = executor_context_->GetPool();
 
   // Extract all valid tuples into a single std::vector (the sort buffer)
   sort_buffer_.reserve(count);
@@ -133,9 +169,9 @@ bool OrderByExecutor::DoSort() {
       std::unique_ptr<storage::Tuple> tuple(
           new storage::Tuple(sort_key_tuple_schema_.get(), true));
       for (oid_t id = 0; id < node.GetSortKeys().size(); id++) {
-        std::unique_ptr<common::Value> val(
-            input_tiles_[tile_id]->GetValue(tuple_id, node.GetSortKeys()[id]));
-        tuple->SetValue(id, *val, executor_pool);
+        type::Value val =
+            (input_tiles_[tile_id]->GetValue(tuple_id, node.GetSortKeys()[id]));
+        tuple->SetValue(id, val, executor_pool);
       }
       // Inert the sort key tuple into sort buffer
       sort_buffer_.emplace_back(sort_buffer_entry_t(
@@ -145,6 +181,15 @@ bool OrderByExecutor::DoSort() {
 
   PL_ASSERT(count == sort_buffer_.size());
 
+  // If the underlying result has the same order, it is not necessary to sort
+  // the result again. Instead, go to the end.
+  if (underling_ordered_) {
+    LOG_TRACE("underling_ordered works and already get all tuples (%lu)",
+              count);
+    sort_done_ = true;
+    return true;
+  }
+
   // Prepare the compare function
   // Note: This is a less-than comparer, NOT an equality comparer.
   struct TupleComparer {
@@ -153,26 +198,19 @@ bool OrderByExecutor::DoSort() {
 
     bool operator()(const storage::Tuple *ta, const storage::Tuple *tb) {
       for (oid_t id = 0; id < descend_flags.size(); id++) {
-        std::unique_ptr<common::Value> va(ta->GetValue(id));
-        std::unique_ptr<common::Value> vb(tb->GetValue(id));
+        type::Value va = (ta->GetValue(id));
+        type::Value vb = (tb->GetValue(id));
         if (!descend_flags[id]) {
-          std::unique_ptr<common::Value> cmp_lt(va->CompareLessThan(*vb));
-          if (cmp_lt->IsTrue())
+          if (va.CompareLessThan(vb) == type::CMP_TRUE)
             return true;
           else {
-            std::unique_ptr<common::Value> cmp_gt(va->CompareGreaterThan(*vb));
-            if (cmp_gt->IsTrue())
-              return false;
+            if (va.CompareGreaterThan(vb) == type::CMP_TRUE) return false;
           }
-        }
-        else {
-          std::unique_ptr<common::Value> cmp_lt(vb->CompareLessThan(*va));
-          if (cmp_lt->IsTrue())
+        } else {
+          if (vb.CompareLessThan(va) == type::CMP_TRUE)
             return true;
           else {
-            std::unique_ptr<common::Value> cmp_gt(vb->CompareGreaterThan(*va));
-            if (cmp_gt->IsTrue())
-            return false;
+            if (vb.CompareGreaterThan(va) == type::CMP_TRUE) return false;
           }
         }
       }
@@ -196,5 +234,5 @@ bool OrderByExecutor::DoSort() {
   return true;
 }
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

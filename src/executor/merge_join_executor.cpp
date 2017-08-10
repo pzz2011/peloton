@@ -6,19 +6,16 @@
 //
 // Identification: src/executor/merge_join_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-
-#include <vector>
-
-#include "common/types.h"
+#include "type/types.h"
 #include "common/logger.h"
 #include "executor/logical_tile_factory.h"
 #include "executor/merge_join_executor.h"
 #include "expression/abstract_expression.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 namespace peloton {
 namespace executor {
@@ -96,7 +93,7 @@ bool MergeJoinExecutor::DExecute() {
       left_child_done_ = true;
       // if we know the join type is left join, we don't have to get the
       // tiles from right child anymore.
-      if (join_type_ == JOIN_TYPE_LEFT || join_type_ == JOIN_TYPE_INNER) {
+      if (join_type_ == JoinType::LEFT || join_type_ == JoinType::INNER) {
         return BuildOuterJoinOutput();
       } else {
         // otherwise, try again
@@ -136,10 +133,9 @@ bool MergeJoinExecutor::DExecute() {
   LogicalTile::PositionListsBuilder pos_lists_builder(left_tile, right_tile);
 
   while ((left_end_row > left_start_row) && (right_end_row > right_start_row)) {
-    expression::ContainerTuple<executor::LogicalTile> left_tuple(
-        left_tile, left_start_row);
-    expression::ContainerTuple<executor::LogicalTile> right_tuple(
-        right_tile, right_start_row);
+    ContainerTuple<executor::LogicalTile> left_tuple(left_tile, left_start_row);
+    ContainerTuple<executor::LogicalTile> right_tuple(right_tile,
+                                                      right_start_row);
     bool not_matching_tuple_pair = false;
 
     // Evaluate and compare the join clauses
@@ -149,14 +145,8 @@ bool MergeJoinExecutor::DExecute() {
       auto right_value =
           clause.right_->Evaluate(&left_tuple, &right_tuple, nullptr);
 
-      // Compare the values
-      std::unique_ptr<common::Value> cmp_less(
-          left_value->CompareLessThan(*right_value));
-      std::unique_ptr<common::Value> cmp_greater(
-        left_value->CompareGreaterThan(*right_value));
-
       // Left key < Right key, advance left
-      if (cmp_less->IsTrue()) {
+      if (left_value.CompareLessThan(right_value) == type::CMP_TRUE) {
         LOG_TRACE("left < right, advance left ");
         left_start_row = left_end_row;
         left_end_row = Advance(left_tile, left_start_row, true);
@@ -164,7 +154,7 @@ bool MergeJoinExecutor::DExecute() {
         break;
       }
       // Left key > Right key, advance right
-      else if (cmp_greater->IsTrue()) {
+      else if (left_value.CompareGreaterThan(right_value) == type::CMP_TRUE) {
         LOG_TRACE("left > right, advance right ");
         right_start_row = right_end_row;
         right_end_row = Advance(right_tile, right_start_row, false);
@@ -188,7 +178,7 @@ bool MergeJoinExecutor::DExecute() {
     if (predicate_ != nullptr) {
       auto eval = predicate_->Evaluate(&left_tuple,
                                       &right_tuple, executor_context_);
-      if (eval->IsFalse()) {
+      if (eval.IsFalse()) {
       //if (predicate_->Evaluate(&left_tuple, &right_tuple, executor_context_)
       //        .IsFalse()) {
         // Join predicate is false. Advance both.
@@ -257,9 +247,8 @@ size_t MergeJoinExecutor::Advance(LogicalTile *tile, size_t start_row,
   if (start_row >= tuple_count) return start_row;
 
   while (end_row < tuple_count) {
-    expression::ContainerTuple<executor::LogicalTile> this_tuple(tile,
-                                                                 this_row);
-    expression::ContainerTuple<executor::LogicalTile> next_tuple(tile, end_row);
+    ContainerTuple<executor::LogicalTile> this_tuple(tile, this_row);
+    ContainerTuple<executor::LogicalTile> next_tuple(tile, end_row);
 
     bool diff = false;
 
@@ -271,9 +260,7 @@ size_t MergeJoinExecutor::Advance(LogicalTile *tile, size_t start_row,
       auto next_value =
           expr->Evaluate(&next_tuple, &next_tuple, executor_context_);
 
-      std::unique_ptr<common::Value> cmp(
-          this_value->CompareEquals(*next_value));
-      if (!cmp->IsTrue()) {
+      if (!(this_value.CompareEquals(next_value) == type::CMP_TRUE)) {
         diff = true;
         break;
       }

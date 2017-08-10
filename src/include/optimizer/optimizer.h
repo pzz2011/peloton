@@ -10,30 +10,41 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
-
-#include "optimizer/memo.h"
-#include "optimizer/column_manager.h"
-#include "optimizer/query_operators.h"
-#include "optimizer/operator_node.h"
-#include "optimizer/binding.h"
-#include "optimizer/pattern.h"
-#include "optimizer/property.h"
-#include "optimizer/property_set.h"
-#include "optimizer/rule.h"
-#include "planner/abstract_plan.h"
-#include "common/logger.h"
 
 #include <memory>
 
+#include "optimizer/abstract_optimizer.h"
+#include "optimizer/column_manager.h"
+#include "optimizer/memo.h"
+#include "optimizer/property_set.h"
+#include "optimizer/rule.h"
+
 namespace peloton {
+
+namespace parser {
+class SQLStatementList;
+class SQLStatement;
+}
+
+namespace planner {
+class AbstractPlan;
+};
+
+namespace optimizer {
+class OperatorExpression;
+}
+
+namespace concurrency {
+class Transaction;
+}
+
 namespace optimizer {
 
 //===--------------------------------------------------------------------===//
 // Optimizer
 //===--------------------------------------------------------------------===//
-class Optimizer {
+class Optimizer : public AbstractOptimizer {
   friend class BindingIterator;
   friend class GroupBindingIterator;
 
@@ -45,20 +56,31 @@ class Optimizer {
 
   Optimizer();
 
-  static Optimizer &GetInstance();
+  std::shared_ptr<planner::AbstractPlan> BuildPelotonPlanTree(
+      const std::unique_ptr<parser::SQLStatementList> &parse_tree,
+      concurrency::Transaction *txn) override;
 
-  std::shared_ptr<planner::AbstractPlan> GeneratePlan(
-      std::shared_ptr<Select> select_tree);
+  void Reset() override;
 
  private:
+  /* HandleDDLStatement - Check and handle DDL statment (currently only support
+   *CREATE), set
+   * is_ddl_stmt to false if there is no DDL statement.
+   *
+   * tree: a peloton query tree representing a select query
+   * return: the DDL plan if it is a DDL statement
+   */
+  std::unique_ptr<planner::AbstractPlan> HandleDDLStatement(
+      parser::SQLStatement *tree, bool &is_ddl_stmt, concurrency::Transaction *txn);
+
   /* TransformQueryTree - create an initial operator tree for the given query
    * to be used in performing optimization.
    *
    * tree: a peloton query tree representing a select query
    * return: the root group expression for the inserted query
    */
-  std::shared_ptr<GroupExpression> InsertQueryTree(
-      std::shared_ptr<Select> tree);
+  std::shared_ptr<GroupExpression> InsertQueryTree(parser::SQLStatement *tree,
+                                                   concurrency::Transaction *txn);
 
   /* GetQueryTreeRequiredProperties - get the required physical properties for
    * a peloton query tree.
@@ -66,7 +88,7 @@ class Optimizer {
    * tree: a peloton query tree representing a select query
    * return: the set of required physical properties for the query
    */
-  PropertySet GetQueryTreeRequiredProperties(std::shared_ptr<Select> tree);
+  PropertySet GetQueryRequiredProperties(parser::SQLStatement *tree);
 
   /* OptimizerPlanToPlannerPlan - convert a tree of physical operators to
    *     a Peloton planner plan for execution.
@@ -74,8 +96,11 @@ class Optimizer {
    * plan: an optimizer plan composed soley of physical operators
    * return: the corresponding planner plan
    */
-  planner::AbstractPlan *OptimizerPlanToPlannerPlan(
-      std::shared_ptr<OpExpression> plan);
+  std::unique_ptr<planner::AbstractPlan> OptimizerPlanToPlannerPlan(
+      std::shared_ptr<OperatorExpression> plan, PropertySet &requirements,
+      std::vector<PropertySet> &required_input_props,
+      std::vector<std::unique_ptr<planner::AbstractPlan>> &children_plans,
+      std::vector<ExprMap> &children_expr_map, ExprMap *output_expr_map);
 
   /* ChooseBestPlan - retrieve the lowest cost tree of physical operators for
    *     the given properties
@@ -83,10 +108,12 @@ class Optimizer {
    * id: the id of the group to produce the best physical
    * requirements: the set of properties the produced physical operator tree
    *     must satisfy
-   * return: the lowest cost tree of physical operators
+   * output_expr_map: The map of expression generate by this group to their
+   * corresponding offsets
+   * return: the lowest cost tree of physical plan nodes
    */
-  std::shared_ptr<OpExpression> ChooseBestPlan(GroupID id,
-                                               PropertySet requirements);
+  std::unique_ptr<planner::AbstractPlan> ChooseBestPlan(
+      GroupID id, PropertySet requirements, ExprMap *output_expr_map);
 
   /* OptimizeGroup - explore the space of plans for the group to produce the
    *     most optimal physical operator tree and place it in the memo. After
@@ -113,17 +140,39 @@ class Optimizer {
   void OptimizeExpression(std::shared_ptr<GroupExpression> gexpr,
                           PropertySet requirements);
 
-  /* CostExpression - determine the cost of the provided group expression by
-   *     recursively optimizing and deriving statistics from child groups to be
-   *     used in producing the cost and statics of the expression.
-   *
-   * gexpr: the group to cost
+  /*
+   * Get alternatives of the <output properties, input child property list> pair
    */
-  void CostExpression(std::shared_ptr<GroupExpression> gexpr);
+  std::vector<std::pair<PropertySet, std::vector<PropertySet>>>
+  DeriveChildProperties(std::shared_ptr<GroupExpression> gexpr,
+                        PropertySet requirements);
+
+  /*
+   * Derive the cost and stats for a group expression given the input/output
+   * properties and the children's stats and costs
+   */
+  void DeriveCostAndStats(std::shared_ptr<GroupExpression> gexpr,
+                          const PropertySet &output_properties,
+                          const std::vector<PropertySet> &input_properties_list,
+                          std::vector<std::shared_ptr<Stats>> child_stats,
+                          std::vector<double> child_costs);
+
+  /* EnforceProperty - Enforce a physical property to a gruop expression.
+   * Typically this will lead to adding another physical operator on top of the
+   * current group expression.
+   *
+   * gexpr: the group expression to enforce property on
+   * property: the required property
+   *
+   * return: the new group expression that has the enforced property
+   */
+  std::shared_ptr<GroupExpression> EnforceProperty(
+      std::shared_ptr<GroupExpression> gexpr, PropertySet &output_properties,
+      const std::shared_ptr<Property> property, PropertySet &requirements);
 
   /* ExploreGroup - exploration equivalent of OptimizeGroup.
    *
-   * gexpr: the group to explore
+   * id: the group to explore
    */
   void ExploreGroup(GroupID id);
 
@@ -136,6 +185,18 @@ class Optimizer {
    */
   void ExploreExpression(std::shared_ptr<GroupExpression> gexpr);
 
+  /* ImplementGroup - Implement physical operators of a group
+   *
+   * id: the group to explore
+   */
+  void ImplementGroup(GroupID id);
+
+  /* ImplementExpression - Implement physical operators of a group expression
+   *
+   * gexpr: the group expression to apply rules to
+   */
+  void ImplementExpression(std::shared_ptr<GroupExpression> gexpr);
+
   //////////////////////////////////////////////////////////////////////////////
   /// Rule application
   std::vector<std::shared_ptr<GroupExpression>> TransformExpression(
@@ -144,24 +205,35 @@ class Optimizer {
   //////////////////////////////////////////////////////////////////////////////
   /// Memo insertion
   std::shared_ptr<GroupExpression> MakeGroupExpression(
-      std::shared_ptr<OpExpression> expr);
+      std::shared_ptr<OperatorExpression> expr);
 
   std::vector<GroupID> MemoTransformedChildren(
-      std::shared_ptr<OpExpression> expr);
+      std::shared_ptr<OperatorExpression> expr);
 
-  GroupID MemoTransformedExpression(std::shared_ptr<OpExpression> expr);
+  GroupID MemoTransformedExpression(std::shared_ptr<OperatorExpression> expr);
 
-  bool RecordTransformedExpression(std::shared_ptr<OpExpression> expr,
+  bool RecordTransformedExpression(std::shared_ptr<OperatorExpression> expr,
                                    std::shared_ptr<GroupExpression> &gexpr);
 
-  bool RecordTransformedExpression(std::shared_ptr<OpExpression> expr,
+  bool RecordTransformedExpression(std::shared_ptr<OperatorExpression> expr,
                                    std::shared_ptr<GroupExpression> &gexpr,
                                    GroupID target_group);
 
-  Memo memo;
-  ColumnManager column_manager;
-  std::vector<std::unique_ptr<Rule>> rules;
+  //////////////////////////////////////////////////////////////////////////////
+  /// Other Helper functions
+  Property *GenerateNewPropertyCols(PropertySet requirements);
+
+  //////////////////////////////////////////////////////////////////////////////
+  /// Member variables
+  Memo memo_;
+  ColumnManager column_manager_;
+
+  // Rules to transform logical plan to equivalent logical plans
+  std::vector<std::unique_ptr<Rule>> logical_transformation_rules_;
+
+  // Rules to transform logical plan to physical implementation
+  std::vector<std::unique_ptr<Rule>> physical_implementation_rules_;
 };
 
-} /* namespace optimizer */
-} /* namespace peloton */
+} // namespace optimizer
+} // namespace peloton

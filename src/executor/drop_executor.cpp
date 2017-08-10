@@ -6,16 +6,17 @@
 //
 // Identification: src/executor/drop_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
-#include <vector>
-
 #include "executor/drop_executor.h"
-#include "executor/executor_context.h"
-#include "common/logger.h"
+
 #include "catalog/catalog.h"
+#include "common/logger.h"
+#include "concurrency/transaction.h"
+#include "executor/executor_context.h"
+#include "planner/drop_plan.h"
 
 namespace peloton {
 namespace executor {
@@ -24,7 +25,7 @@ namespace executor {
 DropExecutor::DropExecutor(const planner::AbstractPlan *node,
                            ExecutorContext *executor_context)
     : AbstractExecutor(node, executor_context) {
-  context = executor_context;
+  context_ = executor_context;
 }
 
 // Initialize executer
@@ -39,28 +40,29 @@ bool DropExecutor::DInit() {
 bool DropExecutor::DExecute() {
   LOG_TRACE("Executing Drop...");
   const planner::DropPlan &node = GetPlanNode<planner::DropPlan>();
-  std::string table_name = node.GetTableName();
+  auto table_name = node.GetTableName();
+  auto current_txn = context_->GetTransaction();
 
-  auto current_txn = context->GetTransaction();
-
-  Result result = catalog::Catalog::GetInstance()->DropTable(
+  ResultType result = catalog::Catalog::GetInstance()->DropTable(
       DEFAULT_DB_NAME, table_name, current_txn);
   current_txn->SetResult(result);
 
-  if (current_txn->GetResult() == Result::RESULT_SUCCESS) {
+  if (current_txn->GetResult() == ResultType::SUCCESS) {
     LOG_TRACE("Dropping table succeeded!");
-  } else if (current_txn->GetResult() == Result::RESULT_FAILURE &&
+  } else if (current_txn->GetResult() == ResultType::FAILURE &&
              node.IsMissing()) {
-    current_txn->SetResult(Result::RESULT_SUCCESS);
+    current_txn->SetResult(ResultType::SUCCESS);
     LOG_TRACE("Dropping table Succeeded!");
-  } else if (current_txn->GetResult() == Result::RESULT_FAILURE &&
+  } else if (current_txn->GetResult() == ResultType::FAILURE &&
              !node.IsMissing()) {
     LOG_TRACE("Dropping table Failed!");
   } else {
-    LOG_TRACE("Result is: %d", current_txn->GetResult());
+    LOG_TRACE("Result is: %s", ResultTypeToString(
+              current_txn->GetResult()).c_str());
   }
 
   return false;
 }
-}
-}
+
+}  // namespace executor
+}  // namespace peloton

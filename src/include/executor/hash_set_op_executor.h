@@ -6,19 +6,18 @@
 //
 // Identification: src/include/executor/hash_set_op_executor.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
 #include <unordered_map>
 
-#include "common/types.h"
+#include "type/types.h"
 #include "executor/abstract_executor.h"
 #include "executor/logical_tile.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 namespace peloton {
 namespace executor {
@@ -62,9 +61,9 @@ class HashSetOpExecutor : public AbstractExecutor {
 
   /** @brief Type definitions for hash table */
   typedef std::unordered_map<
-      expression::ContainerTuple<LogicalTile>, counter_pair_t,
-      expression::ContainerTupleHasher<LogicalTile>,
-      expression::ContainerTupleComparator<LogicalTile>> HashSetOpMapType;
+      ContainerTuple<LogicalTile>, counter_pair_t,
+      ContainerTupleHasher<LogicalTile>,
+      ContainerTupleComparator<LogicalTile>> HashSetOpMapType;
 
   /* Helper functions */
 
@@ -77,7 +76,7 @@ class HashSetOpExecutor : public AbstractExecutor {
   HashSetOpMapType htable_;
 
   /** @brief The specified set-op type */
-  SetOpType set_op_ = SETOP_TYPE_INVALID;
+  SetOpType set_op_ = SetOpType::INVALID;
 
   /** @brief Hash table is built or not */
   bool hash_done_ = false;
@@ -89,5 +88,5 @@ class HashSetOpExecutor : public AbstractExecutor {
   size_t next_tile_to_return_ = 0;
 };
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

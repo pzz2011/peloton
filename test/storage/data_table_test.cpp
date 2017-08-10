@@ -13,9 +13,12 @@
 #include "common/harness.h"
 
 #include "storage/data_table.h"
+
+#include "executor/testing_executor_util.h"
 #include "storage/tile_group.h"
+#include "storage/database.h"
+
 #include "concurrency/transaction_manager_factory.h"
-#include "executor/executor_tests_util.h"
 
 namespace peloton {
 namespace test {
@@ -33,8 +36,8 @@ TEST_F(DataTableTests, TransformTileGroupTest) {
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   auto txn = txn_manager.BeginTransaction();
   std::unique_ptr<storage::DataTable> data_table(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table.get(), tuple_count, false, false,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table.get(), tuple_count, false, false,
                                    true, txn);
   txn_manager.CommitTransaction(txn);
 
@@ -78,8 +81,8 @@ TEST_F(DataTableTests, GlobalTableTest) {
   auto txn = txn_manager.BeginTransaction();
 
   data_table_test_table.reset(
-      ExecutorTestsUtil::CreateTable(tuple_count, false));
-  ExecutorTestsUtil::PopulateTable(data_table_test_table.get(), tuple_count,
+      TestingExecutorUtil::CreateTable(tuple_count, false));
+  TestingExecutorUtil::PopulateTable(data_table_test_table.get(), tuple_count,
                                    false, false, true, txn);
 
   txn_manager.CommitTransaction(txn);
@@ -88,5 +91,5 @@ TEST_F(DataTableTests, GlobalTableTest) {
   delete data_table_pointer;
 }
 
-}  // End test namespace
-}  // End peloton namespace
+}  // namespace test
+}  // namespace peloton

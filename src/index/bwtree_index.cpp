@@ -9,23 +9,20 @@
 // Copyright (c) 2015-16, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
+#include "index/bwtree_index.h"
 
 #include "common/logger.h"
-#include "common/config.h"
-#include "index/bwtree_index.h"
 #include "index/index_key.h"
-#include "storage/tuple.h"
-
 #include "index/scan_optimizer.h"
 #include "statistics/stats_aggregator.h"
+#include "storage/tuple.h"
 
 namespace peloton {
 namespace index {
 
 BWTREE_TEMPLATE_ARGUMENTS
 BWTREE_INDEX_TYPE::BWTreeIndex(IndexMetadata *metadata)
-    :
-      // Base class
+    :  // Base class
       Index{metadata},
       // Key "less than" relation comparator
       comparator{},
@@ -39,7 +36,6 @@ BWTREE_INDEX_TYPE::BWTreeIndex(IndexMetadata *metadata)
       // NOTE 2: We set the first parameter to false to disable automatic GC
       //
       container{false, comparator, equals, hash_func} {
-
   return;
 }
 
@@ -92,7 +88,7 @@ bool BWTREE_INDEX_TYPE::DeleteEntry(const storage::Tuple *key,
 BWTREE_TEMPLATE_ARGUMENTS
 bool BWTREE_INDEX_TYPE::CondInsertEntry(
     const storage::Tuple *key, ItemPointer *value,
-    std::function<bool(const void*)> predicate) {
+    std::function<bool(const void *)> predicate) {
   KeyType index_key;
   index_key.SetFromKey(key);
 
@@ -119,30 +115,29 @@ bool BWTREE_INDEX_TYPE::CondInsertEntry(
   return ret;
 }
 
+/*
+ * Scan() - Scans a range inside the index using index scan optimizer
+ *
+ * The scan optimizer specifies whether a scan is point query, full scan
+ * or interval scan. For all of these cases the corresponding functions from
+ * the index is called, and all elements are returned in result vector
+ */
 BWTREE_TEMPLATE_ARGUMENTS
-void BWTREE_INDEX_TYPE::Scan(const std::vector<common::Value *> &value_list,
-                             const std::vector<oid_t> &tuple_column_id_list,
-                             const std::vector<ExpressionType> &expr_list,
-                             const ScanDirectionType &scan_direction,
-                             std::vector<ValueType> &result,
-                             const ConjunctionScanPredicate *csp_p) {
-  // First make sure all three components of the scan predicate are
-  // of the same length
-  // Since there is a 1-to-1 correspondense between these three vectors
-  PL_ASSERT(tuple_column_id_list.size() == expr_list.size());
-  PL_ASSERT(tuple_column_id_list.size() == value_list.size());
-
+void BWTREE_INDEX_TYPE::Scan(
+    UNUSED_ATTRIBUTE const std::vector<type::Value> &value_list,
+    UNUSED_ATTRIBUTE const std::vector<oid_t> &tuple_column_id_list,
+    UNUSED_ATTRIBUTE const std::vector<ExpressionType> &expr_list,
+    ScanDirectionType scan_direction, std::vector<ValueType> &result,
+    const ConjunctionScanPredicate *csp_p) {
   // This is a hack - we do not support backward scan
-  if (scan_direction == SCAN_DIRECTION_TYPE_INVALID) {
+  if (scan_direction == ScanDirectionType::INVALID) {
     throw Exception("Invalid scan direction \n");
   }
 
-  LOG_TRACE("Point Query = %d; Full Scan = %d ", csp_p->IsPointQuery(),
+  LOG_TRACE("Scan() Point Query = %d; Full Scan = %d ", csp_p->IsPointQuery(),
             csp_p->IsFullIndexScan());
 
   if (csp_p->IsPointQuery() == true) {
-    // For point query we construct the key and use equal_range
-
     const storage::Tuple *point_query_key_p = csp_p->GetPointQueryKey();
 
     KeyType point_query_key;
@@ -154,24 +149,12 @@ void BWTREE_INDEX_TYPE::Scan(const std::vector<common::Value *> &value_list,
     // optimized and super fast
     container.GetValue(point_query_key, result);
   } else if (csp_p->IsFullIndexScan() == true) {
-
     // If it is a full index scan, then just do the scan
     // until we have reached the end of the index by the same
     // we take the snapshot of the last leaf node
     for (auto scan_itr = container.Begin(); (scan_itr.IsEnd() == false);
          scan_itr++) {
-      // Unpack the key as a standard tuple for comparison
-      auto scan_current_key = scan_itr->first;
-      auto tuple =
-          scan_current_key.GetTupleForComparison(metadata->GetKeySchema());
-
-      // Compare whether the current key satisfies the predicate
-      // since we just narrowed down search range using low key and
-      // high key for scan, it is still possible that there are tuples
-      // for which the predicate is not true
-      if (Compare(tuple, tuple_column_id_list, expr_list, value_list) == true) {
-        result.push_back(scan_itr->second);
-      }
+      result.push_back(scan_itr->second);
     }  // for it from begin() to end()
   } else {
     const storage::Tuple *low_key_p = csp_p->GetLowKey();
@@ -195,20 +178,64 @@ void BWTREE_INDEX_TYPE::Scan(const std::vector<common::Value *> &value_list,
          (scan_itr.IsEnd() == false) &&
              (container.KeyCmpLessEqual(scan_itr->first, index_high_key));
          scan_itr++) {
-      auto scan_current_key = scan_itr->first;
-      auto tuple =
-          scan_current_key.GetTupleForComparison(metadata->GetKeySchema());
-
-      if (Compare(tuple, tuple_column_id_list, expr_list, value_list) == true) {
-        result.push_back(scan_itr->second);
-      }
+      result.push_back(scan_itr->second);
     }
   }  // if is full scan
 
   if (FLAGS_stats_mode != STATS_TYPE_INVALID) {
-    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(result.size(),
-                                                                  metadata);
+    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(
+        result.size(), metadata);
   }
+
+  return;
+}
+
+/*
+ * ScanLimit() - Scan the index with predicate and limit/offset
+ *
+ * This function scans the index using the given index optimizer's low key and
+ * high key. In addition to merely doing the scan, it checks scan direction
+ * and uses either begin() or end() iterator to scan the index, and stops
+ * after offset + limit elements are scanned, and limit elements are finally
+ * returned
+ */
+BWTREE_TEMPLATE_ARGUMENTS
+void BWTREE_INDEX_TYPE::ScanLimit(
+    const std::vector<type::Value> &value_list,
+    const std::vector<oid_t> &tuple_column_id_list,
+    const std::vector<ExpressionType> &expr_list,
+    ScanDirectionType scan_direction, std::vector<ValueType> &result,
+    const ConjunctionScanPredicate *csp_p, uint64_t limit, uint64_t offset) {
+
+  // Only work with limit == 1 and offset == 0
+  // Because that gets translated to "min"
+  // But still since we could not access tuples in the table
+  // the index just fetches the first qualified key without further checking
+  // including checking for non-exact bounds!!!
+  if (csp_p->IsPointQuery() == false && limit == 1 && offset == 0 &&
+      scan_direction == ScanDirectionType::FORWARD) {
+    const storage::Tuple *low_key_p = csp_p->GetLowKey();
+    const storage::Tuple *high_key_p = csp_p->GetHighKey();
+
+    LOG_TRACE("ScanLimit() special case (limit = 1; offset = 0; ASCENDING): %s",
+              low_key_p->GetInfo().c_str());
+
+    KeyType index_low_key;
+    KeyType index_high_key;
+    index_low_key.SetFromKey(low_key_p);
+    index_high_key.SetFromKey(high_key_p);
+
+    auto scan_itr = container.Begin(index_low_key);
+    if ((scan_itr.IsEnd() == false) &&
+        (container.KeyCmpLessEqual(scan_itr->first, index_high_key))) {
+
+      result.push_back(scan_itr->second);
+    }
+  } else {
+    Scan(value_list, tuple_column_id_list, expr_list, scan_direction, result,
+         csp_p);
+  }
+
   return;
 }
 
@@ -223,8 +250,8 @@ void BWTREE_INDEX_TYPE::ScanAllKeys(std::vector<ValueType> &result) {
   }
 
   if (FLAGS_stats_mode != STATS_TYPE_INVALID) {
-    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(result.size(),
-                                                                  metadata);
+    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(
+        result.size(), metadata);
   }
   return;
 }
@@ -239,8 +266,8 @@ void BWTREE_INDEX_TYPE::ScanKey(const storage::Tuple *key,
   container.GetValue(index_key, result);
 
   if (FLAGS_stats_mode != STATS_TYPE_INVALID) {
-    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(result.size(),
-                                                                  metadata);
+    stats::BackendStatsContext::GetInstance()->IncrementIndexReads(
+        result.size(), metadata);
   }
 
   return;
@@ -249,63 +276,51 @@ void BWTREE_INDEX_TYPE::ScanKey(const storage::Tuple *key,
 BWTREE_TEMPLATE_ARGUMENTS
 std::string BWTREE_INDEX_TYPE::GetTypeName() const { return "BWTree"; }
 
-// NOTE: If ints key is used as an optimization just uncommend
-// the following in order to instanciation the template before it is
-// linked in linking stage
+// IMPORTANT: Make sure you don't exceed CompactIntegerKey_MAX_SLOTS
 
-/*
-template class BWTreeIndex<IntsKey<1>,
-                           ItemPointer *,
-                           IntsComparator<1>,
-                           IntsEqualityChecker<1>,
-                           IntsHasher<1>,
-                           ItemPointerComparator,
-                           ItemPointerHashFunc>;
-template class BWTreeIndex<IntsKey<2>,
-                           ItemPointer *,
-                           IntsComparator<2>,
-                           IntsEqualityChecker<2>,
-                           IntsHasher<2>,
-                           ItemPointerComparator,
-                           ItemPointerHashFunc>;
-template class BWTreeIndex<IntsKey<3>,
-                           ItemPointer *,
-                           IntsComparator<3>,
-                           IntsEqualityChecker<3>,
-                           IntsHasher<3>,
-                           ItemPointerComparator,
-                           ItemPointerHashFunc>;
-template class BWTreeIndex<IntsKey<4>,
-                           ItemPointer *,
-                           IntsComparator<4>,
-                           IntsEqualityChecker<4>,
-                           IntsHasher<4>,
-                           ItemPointerComparator,
-                           ItemPointerHashFunc>;
-*/
+template class BWTreeIndex<CompactIntsKey<1>, ItemPointer *,
+                           CompactIntsComparator<1>,
+                           CompactIntsEqualityChecker<1>, CompactIntsHasher<1>,
+                           ItemPointerComparator, ItemPointerHashFunc>;
+template class BWTreeIndex<CompactIntsKey<2>, ItemPointer *,
+                           CompactIntsComparator<2>,
+                           CompactIntsEqualityChecker<2>, CompactIntsHasher<2>,
+                           ItemPointerComparator, ItemPointerHashFunc>;
+template class BWTreeIndex<CompactIntsKey<3>, ItemPointer *,
+                           CompactIntsComparator<3>,
+                           CompactIntsEqualityChecker<3>, CompactIntsHasher<3>,
+                           ItemPointerComparator, ItemPointerHashFunc>;
+template class BWTreeIndex<CompactIntsKey<4>, ItemPointer *,
+                           CompactIntsComparator<4>,
+                           CompactIntsEqualityChecker<4>, CompactIntsHasher<4>,
+                           ItemPointerComparator, ItemPointerHashFunc>;
 
 // Generic key
-template class BWTreeIndex<GenericKey<4>, ItemPointer *, GenericComparator<4>,
-                           GenericEqualityChecker<4>, GenericHasher<4>,
-                           ItemPointerComparator, ItemPointerHashFunc>;
-template class BWTreeIndex<GenericKey<8>, ItemPointer *, GenericComparator<8>,
-                           GenericEqualityChecker<8>, GenericHasher<8>,
-                           ItemPointerComparator, ItemPointerHashFunc>;
-template class BWTreeIndex<GenericKey<16>, ItemPointer *, GenericComparator<16>,
+template class BWTreeIndex<GenericKey<4>, ItemPointer *,
+                           FastGenericComparator<4>, GenericEqualityChecker<4>,
+                           GenericHasher<4>, ItemPointerComparator,
+                           ItemPointerHashFunc>;
+template class BWTreeIndex<GenericKey<8>, ItemPointer *,
+                           FastGenericComparator<8>, GenericEqualityChecker<8>,
+                           GenericHasher<8>, ItemPointerComparator,
+                           ItemPointerHashFunc>;
+template class BWTreeIndex<GenericKey<16>, ItemPointer *,
+                           FastGenericComparator<16>,
                            GenericEqualityChecker<16>, GenericHasher<16>,
                            ItemPointerComparator, ItemPointerHashFunc>;
-template class BWTreeIndex<GenericKey<64>, ItemPointer *, GenericComparator<64>,
+template class BWTreeIndex<GenericKey<64>, ItemPointer *,
+                           FastGenericComparator<64>,
                            GenericEqualityChecker<64>, GenericHasher<64>,
                            ItemPointerComparator, ItemPointerHashFunc>;
 template class BWTreeIndex<GenericKey<256>, ItemPointer *,
-                           GenericComparator<256>, GenericEqualityChecker<256>,
-                           GenericHasher<256>, ItemPointerComparator,
-                           ItemPointerHashFunc>;
+                           FastGenericComparator<256>,
+                           GenericEqualityChecker<256>, GenericHasher<256>,
+                           ItemPointerComparator, ItemPointerHashFunc>;
 
 // Tuple key
 template class BWTreeIndex<TupleKey, ItemPointer *, TupleKeyComparator,
                            TupleKeyEqualityChecker, TupleKeyHasher,
                            ItemPointerComparator, ItemPointerHashFunc>;
 
-}  // End index namespace
-}  // End peloton namespace
+}  // namespace index
+}  // namespace peloton

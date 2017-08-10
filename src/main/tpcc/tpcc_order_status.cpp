@@ -34,9 +34,9 @@
 #include "catalog/manager.h"
 #include "catalog/schema.h"
 
-#include "common/types.h"
-#include "common/value.h"
-#include "common/value_factory.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "type/value_factory.h"
 #include "common/logger.h"
 #include "common/timer.h"
 #include "common/generator.h"
@@ -60,7 +60,7 @@
 #include "expression/tuple_value_expression.h"
 #include "expression/comparison_expression.h"
 #include "expression/expression_util.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 #include "index/index_factory.h"
 
@@ -94,7 +94,7 @@ bool RunOrderStatus(const size_t &thread_id){
    */
 
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
-  auto txn = txn_manager.BeginTransaction();
+  auto txn = txn_manager.BeginTransaction(thread_id);
 
   std::unique_ptr<executor::ExecutorContext> context(
     new executor::ExecutorContext(txn));
@@ -122,17 +122,17 @@ bool RunOrderStatus(const size_t &thread_id){
        COL_IDX_C_LAST, COL_IDX_C_BALANCE};
     std::vector<oid_t> customer_key_column_ids = {COL_IDX_C_W_ID, COL_IDX_C_D_ID, COL_IDX_C_ID};
     std::vector<ExpressionType> customer_expr_types;
-    std::vector<common::Value *> customer_key_values;
+    std::vector<type::Value > customer_key_values;
     std::vector<expression::AbstractExpression *> runtime_keys;
 
-    customer_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(w_id).Copy());
+    customer_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(w_id).Copy());
     customer_expr_types.push_back(
-      ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
+      ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
     customer_expr_types.push_back(
-      ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(c_id).Copy());
+      ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(c_id).Copy());
 
     auto customer_pkey_index = customer_table->GetIndexWithOid(customer_table_pkey_index_oid);
 
@@ -146,7 +146,7 @@ bool RunOrderStatus(const size_t &thread_id){
     executor::IndexScanExecutor customer_index_scan_executor(&customer_index_scan_node, context.get());
 
     auto result = ExecuteRead(&customer_index_scan_executor);
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       txn_manager.AbortTransaction(txn);
       return false;
     }
@@ -167,17 +167,17 @@ bool RunOrderStatus(const size_t &thread_id){
        COL_IDX_C_LAST, COL_IDX_C_BALANCE};
     std::vector<oid_t> customer_key_column_ids = {COL_IDX_C_W_ID, COL_IDX_C_D_ID, COL_IDX_C_LAST};
     std::vector<ExpressionType> customer_expr_types;
-    std::vector<common::Value *> customer_key_values;
+    std::vector<type::Value > customer_key_values;
     std::vector<expression::AbstractExpression *> runtime_keys;
 
-    customer_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(w_id).Copy());
+    customer_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(w_id).Copy());
     customer_expr_types.push_back(
-      ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
+      ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
     customer_expr_types.push_back(
-      ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_key_values.push_back(common::ValueFactory::GetVarcharValue(c_last).Copy());
+      ExpressionType::COMPARE_EQUAL);
+    customer_key_values.push_back(type::ValueFactory::GetVarcharValue(c_last).Copy());
 
     auto customer_skey_index = customer_table->GetIndexWithOid(customer_table_skey_index_oid);
 
@@ -202,7 +202,7 @@ bool RunOrderStatus(const size_t &thread_id){
     customer_order_by_executor.AddChild(&customer_index_scan_executor);
     
     auto result = ExecuteRead(&customer_order_by_executor);
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       txn_manager.AbortTransaction(txn);
       return false;
     }
@@ -212,7 +212,7 @@ bool RunOrderStatus(const size_t &thread_id){
     size_t name_count = result.size();
     auto &customer = result[name_count/2];
     PL_ASSERT(customer.size() > 0);
-    c_id = common::ValuePeeker::PeekInteger(customer[0]);
+    c_id = type::ValuePeeker::PeekInteger(customer[0]);
   }
 
   if (c_id < 0) {
@@ -227,15 +227,15 @@ bool RunOrderStatus(const size_t &thread_id){
   , COL_IDX_O_CARRIER_ID, COL_IDX_O_ENTRY_D};
   std::vector<oid_t> orders_key_column_ids = {COL_IDX_O_W_ID, COL_IDX_O_D_ID, COL_IDX_O_C_ID};
   std::vector<ExpressionType> orders_expr_types;
-  std::vector<common::Value *> orders_key_values;
+  std::vector<type::Value > orders_key_values;
   std::vector<expression::AbstractExpression *> runtime_keys;
 
-  orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-  orders_key_values.push_back(common::ValueFactory::GetIntegerValue(w_id).Copy());
-  orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-  orders_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-  orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-  orders_key_values.push_back(common::ValueFactory::GetIntegerValue(c_id).Copy());
+  orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+  orders_key_values.push_back(type::ValueFactory::GetIntegerValue(w_id).Copy());
+  orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+  orders_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+  orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+  orders_key_values.push_back(type::ValueFactory::GetIntegerValue(c_id).Copy());
 
   // Get the index
   auto orders_skey_index = orders_table->GetIndexWithOid(orders_table_skey_index_oid);
@@ -269,7 +269,7 @@ bool RunOrderStatus(const size_t &thread_id){
   limit_executor.AddChild(&orders_order_by_executor);
 
   auto orders = ExecuteRead(&orders_order_by_executor);
-  if (txn->GetResult() != Result::RESULT_SUCCESS) {
+  if (txn->GetResult() != ResultType::SUCCESS) {
     txn_manager.AbortTransaction(txn);
     return false;
   }
@@ -281,13 +281,13 @@ bool RunOrderStatus(const size_t &thread_id){
     std::vector<oid_t> order_line_column_ids = {COL_IDX_OL_SUPPLY_W_ID, COL_IDX_OL_I_ID, COL_IDX_OL_QUANTITY, COL_IDX_OL_AMOUNT, COL_IDX_OL_DELIVERY_D};
     std::vector<oid_t> order_line_key_column_ids = {COL_IDX_OL_W_ID, COL_IDX_OL_D_ID, COL_IDX_OL_O_ID};
     std::vector<ExpressionType> order_line_expr_types;
-    std::vector<common::Value *> order_line_key_values;
+    std::vector<type::Value > order_line_key_values;
 
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    order_line_key_values.push_back(common::ValueFactory::GetIntegerValue(w_id).Copy());
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    order_line_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    order_line_key_values.push_back(type::ValueFactory::GetIntegerValue(w_id).Copy());
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    order_line_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
     order_line_key_values.push_back(orders[0][0]);
 
     auto order_line_skey_index = order_line_table->GetIndexWithOid(order_line_table_skey_index_oid);
@@ -303,17 +303,17 @@ bool RunOrderStatus(const size_t &thread_id){
     executor::IndexScanExecutor order_line_index_scan_executor(&order_line_index_scan_node, context.get());
 
     ExecuteRead(&order_line_index_scan_executor);
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       txn_manager.AbortTransaction(txn);
       return false;
     }
   }
 
-  PL_ASSERT(txn->GetResult() == Result::RESULT_SUCCESS);
+  PL_ASSERT(txn->GetResult() == ResultType::SUCCESS);
 
   auto result = txn_manager.CommitTransaction(txn);
 
-  if (result == Result::RESULT_SUCCESS) {
+  if (result == ResultType::SUCCESS) {
     return true;
   } else {
     return false;

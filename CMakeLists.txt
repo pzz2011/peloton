@@ -13,8 +13,8 @@ project(Peloton CXX C)
 include(CTest)
 
 # ---[ Peloton version
-set(PELOTON_TARGET_VERSION "0.0.3" CACHE STRING "Peloton logical version")
-set(PELOTON_TARGET_SOVERSION "0.0.3" CACHE STRING "Peloton soname version")
+set(PELOTON_TARGET_VERSION "0.0.5" CACHE STRING "Peloton logical version")
+set(PELOTON_TARGET_SOVERSION "0.0.5" CACHE STRING "Peloton soname version")
 add_definitions(-DPELOTON_VERSION=${PELOTON_TARGET_VERSION})
 
 # --[ Output directory
@@ -42,13 +42,18 @@ include(cmake/Dependencies.cmake)
 
 # ---[ C++11 Flags
 include(CheckCXXCompilerFlag)
-CHECK_CXX_COMPILER_FLAG("-std=c++1y" COMPILER_SUPPORTS_CXX1Y)
+check_cxx_compiler_flag("-std=c++1y" COMPILER_SUPPORTS_CXX1Y)
 
 if(COMPILER_SUPPORTS_CXX1Y)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1y")
 else()
     message(STATUS "The compiler ${CMAKE_CXX_COMPILER} has no C++1Y support. Please use a different C++ compiler.")
 endif()
+
+# Create a new pre-processor macro __PELOTONFILE__ that has a truncated 
+# path to reduce the size of the debug log messages.
+# Source: http://stackoverflow.com/a/16658858
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__PELOTONFILE__='\"$(subst ${CMAKE_SOURCE_DIR}/,,$(abspath $<))\"'")
 
 # ---[ Color diagnostics
 
@@ -64,15 +69,43 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND
 endif()
 
 # -- [ Debug Flags
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -fno-omit-frame-pointer -fno-optimize-sibling-calls")
 
 # ---[ Flags
 if(UNIX OR APPLE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wall -Wextra -Werror -mcx16")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wall -Wextra -Werror -mcx16 -Wno-invalid-offsetof -march=native")
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-undefined-compare -Wno-unused-private-field -Wno-braced-scalar-init -Wno-constant-conversion -Wno-potentially-evaluated-expression -Wno-infinite-recursion -D__STDC_CONSTANT_MACROS -D__STDC_LIMIT_MACROS -I/usr/local/opt/openssl/include")
+    endif()
 endif()
 
 # ---[ Warnings
 peloton_warnings_disable(CMAKE_CXX_FLAGS -Wno-strict-aliasing)
+
+# Turn on sanitizers if necessary.
+if(USE_SANITIZER)
+    if (USE_SANITIZER STREQUAL "Address")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+    elseif (USE_SANITIZER STREQUAL "Undefined")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fno-sanitize=vptr,function -fno-sanitize-recover=all")
+    elseif (USE_SANITIZER STREQUAL "Thread")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
+    elseif (USE_SANITIZER STREQUAL "Address;Undefined" OR
+            USE_SANITIZER STREQUAL "Undefined;Address")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,undefined -fno-sanitize=vptr,function -fno-sanitize-recover=all")
+    else()
+        message(FATAL_ERROR "Unsupported value of USE_SANITIZER: ${USE_SANITIZER}")
+    endif()
+    if (USE_SANITIZER MATCHES "(Undefined;)?Address(;Undefined)?")
+        check_cxx_compiler_flag(-fsanitize-address-use-after-scope FSANITIZE_USE_AFTER_SCOPE_FLAG)
+        if (${FSANITIZE_USE_AFTER_SCOPE_FLAG})
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize-address-use-after-scope")
+        endif()
+    endif()
+    if (CMAKE_COMPILER_IS_GNUCC)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=gold")
+    endif()
+endif()
 
 # -- [ Coverage
 option(COVERALLS "Generate coveralls data" OFF)

@@ -10,16 +10,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
-#include <iostream>
 #include <mutex>
 
 #include "common/printable.h"
 #include "storage/data_table.h"
 
-struct peloton_status;
+struct ExecuteResult;
 struct dirty_table_info;
 struct dirty_index_info;
 
@@ -35,7 +33,7 @@ class Database : public Printable {
   Database() = delete;
   Database(Database const &) = delete;
 
-  Database(const oid_t &database_oid);
+  Database(const oid_t database_oid);
 
   ~Database();
 
@@ -49,7 +47,7 @@ class Database : public Printable {
   // TABLE
   //===--------------------------------------------------------------------===//
 
-  void AddTable(storage::DataTable *table);
+  void AddTable(storage::DataTable *table, bool is_catalog = false);
 
   storage::DataTable *GetTable(const oid_t table_offset) const;
 
@@ -57,7 +55,7 @@ class Database : public Printable {
   storage::DataTable *GetTableWithOid(const oid_t table_oid) const;
 
   // Throw CatalogException if such table is not found
-  storage::DataTable *GetTableWithName(const std::string table_name) const;
+  storage::DataTable *GetTableWithName(const std::string &table_name) const;
 
   oid_t GetTableCount() const;
 
@@ -69,8 +67,10 @@ class Database : public Printable {
 
   // Get a string representation for debugging
   const std::string GetInfo() const;
+
+  // deprecated, use catalog::DatabaseCatalog::GetInstance()->GetDatabaseName()
   std::string GetDBName();
-  void setDBName(const std::string& database_name);
+  void setDBName(const std::string &database_name);
 
  protected:
   //===--------------------------------------------------------------------===//
@@ -78,9 +78,11 @@ class Database : public Printable {
   //===--------------------------------------------------------------------===//
 
   // database oid
-  oid_t database_oid = INVALID_OID;
+  const oid_t database_oid;
 
   // database name
+  // TODO: deprecated, use
+  // catalog::DatabaseCatalog::GetInstance()->GetDatabaseName()
   std::string database_name;
 
   // TABLES
@@ -89,5 +91,5 @@ class Database : public Printable {
   std::mutex database_mutex;
 };
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

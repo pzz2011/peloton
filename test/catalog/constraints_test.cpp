@@ -11,11 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "gtest/gtest.h"
+
+#include "concurrency/testing_transaction_util.h"
 #include "common/harness.h"
 
 #include "catalog/schema.h"
 #include "catalog/foreign_key.h"
-#include "common/value.h"
+#include "type/value.h"
 #include "concurrency/transaction.h"
 #include "concurrency/transaction_manager_factory.h"
 #include "executor/abstract_executor.h"
@@ -26,7 +28,6 @@
 #include "index/index_factory.h"
 
 #include "catalog/constraints_tests_util.h"
-#include "concurrency/transaction_tests_util.h"
 
 #define NOTNULL_TEST
 #define PRIMARY_UNIQUEKEY_TEST
@@ -67,12 +68,12 @@ TEST_F(ConstraintsTests, NOTNULLTest) {
   bool hasException = false;
   try {
     ConstraintsTestsUtil::ExecuteInsert(
-        txn, data_table.get(), common::ValueFactory::GetNullValue(),
-        common::ValueFactory::GetIntegerValue(
+        txn, data_table.get(), type::ValueFactory::GetNullValue(),
+        type::ValueFactory::GetIntegerValue(
             ConstraintsTestsUtil::PopulatedValue(15, 1)),
-        common::ValueFactory::GetIntegerValue(
+        type::ValueFactory::GetIntegerValue(
             ConstraintsTestsUtil::PopulatedValue(15, 2)),
-        common::ValueFactory::GetVarcharValue(
+        type::ValueFactory::GetVarcharValue(
             std::to_string(ConstraintsTestsUtil::PopulatedValue(15, 3))));
 
   } catch (ConstraintException e) {
@@ -84,13 +85,13 @@ TEST_F(ConstraintsTests, NOTNULLTest) {
   hasException = false;
   try {
     ConstraintsTestsUtil::ExecuteInsert(
-        txn, data_table.get(), common::ValueFactory::GetIntegerValue(
+        txn, data_table.get(), type::ValueFactory::GetIntegerValue(
                                    ConstraintsTestsUtil::PopulatedValue(15, 0)),
-        common::ValueFactory::GetIntegerValue(
+        type::ValueFactory::GetIntegerValue(
             ConstraintsTestsUtil::PopulatedValue(15, 1)),
-        common::ValueFactory::GetIntegerValue(
+        type::ValueFactory::GetIntegerValue(
             ConstraintsTestsUtil::PopulatedValue(15, 2)),
-        common::ValueFactory::GetVarcharValue(
+        type::ValueFactory::GetVarcharValue(
             std::to_string(ConstraintsTestsUtil::PopulatedValue(15, 3))));
   } catch (ConstraintException e) {
     hasException = true;
@@ -131,8 +132,8 @@ TEST_F(ConstraintsTests, CombinedPrimaryKeyTest) {
 
     scheduler.Run();
 
-    EXPECT_TRUE(RESULT_SUCCESS == scheduler.schedules[0].txn_result);
-    EXPECT_TRUE(RESULT_ABORTED == scheduler.schedules[1].txn_result);
+    EXPECT_TRUE(ResultType::SUCCESS == scheduler.schedules[0].txn_result);
+    EXPECT_TRUE(ResultType::ABORTED == scheduler.schedules[1].txn_result);
   }
 }
 
@@ -160,10 +161,10 @@ TEST_F(ConstraintsTests, MultiTransactionUniqueConstraintsTest) {
 
     scheduler.Run();
 
-    EXPECT_TRUE((RESULT_SUCCESS == scheduler.schedules[0].txn_result &&
-                 RESULT_ABORTED == scheduler.schedules[1].txn_result) ||
-                (RESULT_SUCCESS == scheduler.schedules[1].txn_result &&
-                 RESULT_ABORTED == scheduler.schedules[0].txn_result));
+    EXPECT_TRUE((ResultType::SUCCESS == scheduler.schedules[0].txn_result &&
+                 ResultType::ABORTED == scheduler.schedules[1].txn_result) ||
+                (ResultType::SUCCESS == scheduler.schedules[1].txn_result &&
+                 ResultType::ABORTED == scheduler.schedules[0].txn_result));
   }
 
   {
@@ -182,8 +183,8 @@ TEST_F(ConstraintsTests, MultiTransactionUniqueConstraintsTest) {
 
     scheduler.Run();
 
-    EXPECT_TRUE(RESULT_ABORTED == scheduler.schedules[0].txn_result);
-    EXPECT_TRUE(RESULT_SUCCESS == scheduler.schedules[1].txn_result);
+    EXPECT_TRUE(ResultType::ABORTED == scheduler.schedules[0].txn_result);
+    EXPECT_TRUE(ResultType::SUCCESS == scheduler.schedules[1].txn_result);
   }
 
   {
@@ -202,8 +203,8 @@ TEST_F(ConstraintsTests, MultiTransactionUniqueConstraintsTest) {
 
     scheduler.Run();
 
-    EXPECT_TRUE(RESULT_SUCCESS == scheduler.schedules[0].txn_result);
-    EXPECT_TRUE(RESULT_SUCCESS == scheduler.schedules[1].txn_result);
+    EXPECT_TRUE(ResultType::SUCCESS == scheduler.schedules[0].txn_result);
+    EXPECT_TRUE(ResultType::SUCCESS == scheduler.schedules[1].txn_result);
   }
 }
 #endif
@@ -251,8 +252,8 @@ TEST_F(ConstraintsTests, ForeignKeyInsertTest) {
 
     scheduler.Run();
 
-    EXPECT_TRUE(RESULT_ABORTED == scheduler.schedules[0].txn_result);
-    EXPECT_TRUE(RESULT_SUCCESS == scheduler.schedules[1].txn_result);
+    EXPECT_TRUE(ResultType::ABORTED == scheduler.schedules[0].txn_result);
+    EXPECT_TRUE(ResultType::SUCCESS == scheduler.schedules[1].txn_result);
   }
 
   // this will also indirectly delete all tables in this database
@@ -261,5 +262,5 @@ TEST_F(ConstraintsTests, ForeignKeyInsertTest) {
 #endif
 */
 
-}  // End test namespace
-}  // End peloton namespace
+}  // namespace test
+}  // namespace peloton

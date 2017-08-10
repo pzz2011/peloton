@@ -36,9 +36,9 @@
 #include "catalog/schema.h"
 #include "catalog/column.h"
 
-#include "common/types.h"
-#include "common/value.h"
-#include "common/value_factory.h"
+#include "type/types.h"
+#include "type/value.h"
+#include "type/value_factory.h"
 #include "common/logger.h"
 #include "common/timer.h"
 #include "common/generator.h"
@@ -63,7 +63,7 @@
 #include "expression/tuple_value_expression.h"
 #include "expression/comparison_expression.h"
 #include "expression/expression_util.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 
 #include "index/index_factory.h"
 
@@ -117,7 +117,7 @@ bool RunDelivery(const size_t &thread_id){
 
   auto &txn_manager = concurrency::TransactionManagerFactory::GetInstance();
   
-  auto txn = txn_manager.BeginTransaction();
+  auto txn = txn_manager.BeginTransaction(thread_id);
 
   std::unique_ptr<executor::ExecutorContext> context(
     new executor::ExecutorContext(txn));
@@ -131,15 +131,15 @@ bool RunDelivery(const size_t &thread_id){
     
     std::vector<ExpressionType> new_order_expr_types;
     
-    new_order_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    new_order_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    new_order_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_GREATERTHAN);
+    new_order_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    new_order_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    new_order_expr_types.push_back(ExpressionType::COMPARE_GREATERTHAN);
     
-    std::vector<common::Value *> new_order_key_values;
+    std::vector<type::Value> new_order_key_values;
     
-    new_order_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    new_order_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
-    new_order_key_values.push_back(common::ValueFactory::GetIntegerValue(-1).Copy());
+    new_order_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    new_order_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    new_order_key_values.push_back(type::ValueFactory::GetIntegerValue(-1).Copy());
 
     // Get the index
     auto new_order_pkey_index = new_order_table->GetIndexWithOid(new_order_table_pkey_index_oid);
@@ -162,7 +162,7 @@ bool RunDelivery(const size_t &thread_id){
 
     auto new_order_ids = ExecuteRead(&limit_executor);
     
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -179,7 +179,7 @@ bool RunDelivery(const size_t &thread_id){
     // result: NO_O_ID
     auto no_o_id = new_order_ids[0][0];
 
-    LOG_TRACE("no_o_id = %d", ValuePeeker::PeekInteger(no_o_id));
+    LOG_TRACE("no_o_id = %d", type::ValuePeeker::PeekInteger(no_o_id));
 
     LOG_TRACE("getCId: SELECT O_C_ID FROM ORDERS WHERE O_ID = ? AND O_D_ID = ? AND O_W_ID = ?");
 
@@ -189,15 +189,15 @@ bool RunDelivery(const size_t &thread_id){
     
     std::vector<ExpressionType> orders_expr_types;
     
-    orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    orders_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+    orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    orders_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
     
-    std::vector<common::Value *> orders_key_values;
+    std::vector<type::Value> orders_key_values;
 
     orders_key_values.push_back(no_o_id);
-    orders_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    orders_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    orders_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    orders_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
 
     // Get the index
     auto orders_pkey_index = orders_table->GetIndexWithOid(orders_table_pkey_index_oid);
@@ -215,7 +215,7 @@ bool RunDelivery(const size_t &thread_id){
 
     auto orders_ids = ExecuteRead(&orders_index_scan_executor);
     
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -235,15 +235,15 @@ bool RunDelivery(const size_t &thread_id){
     
     std::vector<ExpressionType> order_line_expr_types;
     
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    order_line_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    order_line_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
 
-    std::vector<common::Value *> order_line_key_values;
+    std::vector<type::Value> order_line_key_values;
 
     order_line_key_values.push_back(no_o_id);
-    order_line_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    order_line_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    order_line_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    order_line_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
     
     auto order_line_pkey_index = order_line_table->GetIndexWithOid(order_line_table_pkey_index_oid);
     planner::IndexScanPlan::IndexScanDesc order_line_index_scan_desc(
@@ -257,7 +257,7 @@ bool RunDelivery(const size_t &thread_id){
 
     auto order_line_index_scan_res = ExecuteRead(&order_line_index_scan_executor);
 
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -268,10 +268,10 @@ bool RunDelivery(const size_t &thread_id){
     // Workaround: Externanl sum
     for (auto v : order_line_index_scan_res) {
       assert(v.size() == 1);
-      sum_res += common::ValuePeeker::PeekDouble(v[0]);
+      sum_res += type::ValuePeeker::PeekDouble(v[0]);
     }
 
-    auto ol_total = common::ValueFactory::GetDoubleValue(sum_res);
+    auto ol_total = type::ValueFactory::GetDecimalValue(sum_res);
 
     LOG_TRACE("deleteNewOrder: DELETE FROM NEW_ORDER WHERE NO_D_ID = ? AND NO_W_ID = ? AND NO_O_ID = ?");
 
@@ -280,14 +280,14 @@ bool RunDelivery(const size_t &thread_id){
 
     std::vector<ExpressionType> new_order_delete_expr_types;
     
-    new_order_delete_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    new_order_delete_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    new_order_delete_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+    new_order_delete_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    new_order_delete_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    new_order_delete_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
 
-    std::vector<common::Value *> new_order_delete_key_values;
+    std::vector<type::Value> new_order_delete_key_values;
 
-    new_order_delete_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    new_order_delete_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    new_order_delete_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    new_order_delete_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
     new_order_delete_key_values.push_back(no_o_id);
 
     planner::IndexScanPlan::IndexScanDesc new_order_delete_idex_scan_desc(
@@ -302,7 +302,7 @@ bool RunDelivery(const size_t &thread_id){
     executor::IndexScanExecutor new_order_delete_index_scan_executor(&new_order_delete_idex_scan_node, context.get());
 
     // Construct delete executor
-    planner::DeletePlan new_order_delete_node(new_order_table, false);
+    planner::DeletePlan new_order_delete_node(new_order_table);
 
     executor::DeleteExecutor new_order_delete_executor(&new_order_delete_node, context.get());
 
@@ -312,7 +312,7 @@ bool RunDelivery(const size_t &thread_id){
     ExecuteDelete(&new_order_delete_executor);
     
     // Check if aborted
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -324,11 +324,11 @@ bool RunDelivery(const size_t &thread_id){
     std::vector<oid_t> orders_update_column_ids = {COL_IDX_O_CARRIER_ID};
 
 
-    std::vector<common::Value *> orders_update_key_values;
+    std::vector<type::Value> orders_update_key_values;
 
     orders_update_key_values.push_back(no_o_id);
-    orders_update_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    orders_update_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    orders_update_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    orders_update_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
     
     planner::IndexScanPlan::IndexScanDesc orders_update_index_scan_desc(
       orders_pkey_index, orders_key_column_ids, orders_expr_types,
@@ -351,11 +351,11 @@ bool RunDelivery(const size_t &thread_id){
         orders_direct_map_list.emplace_back(col_itr, std::make_pair(0, col_itr));
       }
     }
-    common::Value * orders_update_val = common::ValueFactory::GetIntegerValue(o_carrier_id).Copy();
+    type::Value orders_update_val = type::ValueFactory::GetIntegerValue(o_carrier_id).Copy();
 
-    orders_target_list.emplace_back(
-      COL_IDX_O_CARRIER_ID, expression::ExpressionUtil::ConstantValueFactory(*orders_update_val)
-    );
+    planner::DerivedAttribute carrier_id{
+        expression::ExpressionUtil::ConstantValueFactory(orders_update_val)};
+    orders_target_list.emplace_back(COL_IDX_O_CARRIER_ID, carrier_id);
 
     std::unique_ptr<const planner::ProjectInfo> orders_project_info(
       new planner::ProjectInfo(std::move(orders_target_list),
@@ -369,7 +369,7 @@ bool RunDelivery(const size_t &thread_id){
     // Execute the query
     ExecuteUpdate(&orders_update_executor);
     
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -382,11 +382,11 @@ bool RunDelivery(const size_t &thread_id){
     std::vector<oid_t> order_line_update_column_ids = {COL_IDX_OL_DELIVERY_D};
 
 
-    std::vector<common::Value *> order_line_update_key_values;
+    std::vector<type::Value> order_line_update_key_values;
 
     order_line_update_key_values.push_back(no_o_id);
-    order_line_update_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    order_line_update_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    order_line_update_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    order_line_update_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
     
     planner::IndexScanPlan::IndexScanDesc order_line_update_index_scan_desc(
       order_line_pkey_index, order_line_key_column_ids, order_line_expr_types,
@@ -408,11 +408,10 @@ bool RunDelivery(const size_t &thread_id){
        order_line_direct_map_list.emplace_back(col_itr, std::make_pair(0, col_itr));
      }
     }
-    common::Value * order_line_update_val = common::ValueFactory::GetTimestampValue(0).Copy();
+    type::Value order_line_update_val = type::ValueFactory::GetTimestampValue(0).Copy();
 
-    order_line_target_list.emplace_back(
-      COL_IDX_OL_DELIVERY_D, expression::ExpressionUtil::ConstantValueFactory(*order_line_update_val)
-    );
+    planner::DerivedAttribute delivery_id{expression::ExpressionUtil::ConstantValueFactory(order_line_update_val)};
+    order_line_target_list.emplace_back(COL_IDX_OL_DELIVERY_D, delivery_id);
 
     std::unique_ptr<const planner::ProjectInfo> order_line_project_info(
      new planner::ProjectInfo(std::move(order_line_target_list),
@@ -425,7 +424,7 @@ bool RunDelivery(const size_t &thread_id){
 
     ExecuteUpdate(&order_line_update_executor);
     
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
@@ -439,15 +438,15 @@ bool RunDelivery(const size_t &thread_id){
     
     std::vector<ExpressionType> customer_expr_types;
 
-    customer_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
-    customer_expr_types.push_back(ExpressionType::EXPRESSION_TYPE_COMPARE_EQUAL);
+    customer_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    customer_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
+    customer_expr_types.push_back(ExpressionType::COMPARE_EQUAL);
 
-    std::vector<common::Value *> customer_key_values;
+    std::vector<type::Value> customer_key_values;
 
     customer_key_values.push_back(c_id);
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(d_id).Copy());
-    customer_key_values.push_back(common::ValueFactory::GetIntegerValue(warehouse_id).Copy());
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(d_id).Copy());
+    customer_key_values.push_back(type::ValueFactory::GetIntegerValue(warehouse_id).Copy());
     
     auto customer_pkey_index = customer_table->GetIndexWithOid(customer_table_pkey_index_oid);
 
@@ -474,16 +473,16 @@ bool RunDelivery(const size_t &thread_id){
     // Expressions
     // Tuple value expression
     auto tuple_val_expr = expression::ExpressionUtil::TupleValueFactory(
-      common::Type::INTEGER, 0, COL_IDX_C_BALANCE);
+      type::TypeId::INTEGER, 0, COL_IDX_C_BALANCE);
     // Constant value expression
     auto constant_val_expr = expression::ExpressionUtil::ConstantValueFactory(
       ol_total);
     // + operator expression
     auto plus_operator_expr = expression::ExpressionUtil::OperatorFactory(
-      EXPRESSION_TYPE_OPERATOR_PLUS, common::Type::INTEGER, tuple_val_expr, constant_val_expr);
+      ExpressionType::OPERATOR_PLUS, type::TypeId::INTEGER, tuple_val_expr, constant_val_expr);
 
-    customer_target_list.emplace_back(
-      COL_IDX_C_BALANCE, plus_operator_expr);
+    planner::DerivedAttribute c_balance{plus_operator_expr};
+    customer_target_list.emplace_back(COL_IDX_C_BALANCE, c_balance);
 
 
     std::unique_ptr<const planner::ProjectInfo> customer_project_info(
@@ -498,23 +497,23 @@ bool RunDelivery(const size_t &thread_id){
     // Execute the query
     ExecuteUpdate(&customer_update_executor);
 
-    if (txn->GetResult() != Result::RESULT_SUCCESS) {
+    if (txn->GetResult() != ResultType::SUCCESS) {
       LOG_TRACE("abort transaction");
       txn_manager.AbortTransaction(txn);
       return false;
     }
   }
 
-  assert(txn->GetResult() == Result::RESULT_SUCCESS);
+  assert(txn->GetResult() == ResultType::SUCCESS);
 
   auto result = txn_manager.CommitTransaction(txn);
 
-  if (result == Result::RESULT_SUCCESS) {
+  if (result == ResultType::SUCCESS) {
     LOG_TRACE("commit successfully");
     return true;
   } else {
-    assert(result == Result::RESULT_ABORTED || 
-           result == Result::RESULT_FAILURE);
+    assert(result == ResultType::ABORTED || 
+           result == ResultType::FAILURE);
     return false;
   }
 }

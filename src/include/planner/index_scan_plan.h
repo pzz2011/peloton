@@ -16,11 +16,11 @@
 #include <string>
 #include <vector>
 
-#include "planner/abstract_scan_plan.h"
-#include "common/types.h"
 #include "expression/abstract_expression.h"
-#include "storage/tuple.h"
 #include "index/scan_optimizer.h"
+#include "planner/abstract_scan_plan.h"
+#include "storage/tuple.h"
+#include "type/types.h"
 
 namespace peloton {
 
@@ -40,7 +40,6 @@ class IndexScanPlan : public AbstractScan {
    * class IndexScanDesc - Stores information to do the index scan
    */
   struct IndexScanDesc {
-
     /*
      * Default Constructor - Set index pointer to empty
      *
@@ -60,7 +59,7 @@ class IndexScanPlan : public AbstractScan {
         std::shared_ptr<index::Index> p_index_obj,
         const std::vector<oid_t> &p_tuple_column_id_list,
         const std::vector<ExpressionType> &expr_list_p,
-        const std::vector<common::Value *> &p_value_list,
+        const std::vector<type::Value> &p_value_list,
         const std::vector<expression::AbstractExpression *> &p_runtime_key_list)
         : index_obj(p_index_obj),
           tuple_column_id_list(p_tuple_column_id_list),
@@ -69,7 +68,7 @@ class IndexScanPlan : public AbstractScan {
           runtime_key_list(p_runtime_key_list) {}
 
     ~IndexScanDesc() {
-      //for (auto val : value_list)
+      // for (auto val : value_list)
       //  delete val;
     }
 
@@ -91,7 +90,7 @@ class IndexScanPlan : public AbstractScan {
     std::vector<ExpressionType> expr_list;
 
     // A list of values either bounded or unbounded
-    std::vector<common::Value *> value_list;
+    std::vector<type::Value> value_list;
 
     // ???
     std::vector<expression::AbstractExpression *> runtime_key_list;
@@ -101,25 +100,15 @@ class IndexScanPlan : public AbstractScan {
   // Members of IndexScanPlan
   ///////////////////////////////////////////////////////////////////
 
-  IndexScanPlan(const IndexScanPlan &) = delete;
-  IndexScanPlan &operator=(const IndexScanPlan &) = delete;
-  IndexScanPlan(IndexScanPlan &&) = delete;
-  IndexScanPlan &operator=(IndexScanPlan &&) = delete;
-
   IndexScanPlan(storage::DataTable *table,
                 expression::AbstractExpression *predicate,
                 const std::vector<oid_t> &column_ids,
-                const IndexScanDesc &index_scan_desc, bool for_update_flag = false);
+                const IndexScanDesc &index_scan_desc,
+                bool for_update_flag = false);
 
   ~IndexScanPlan() {
     for (auto expr : runtime_keys_) {
       delete expr;
-    }
-    for (auto val : values_) {
-      delete val;
-    }
-    for (auto val : values_with_params_) {
-      delete val;
     }
     LOG_TRACE("Destroyed a index scan plan!");
   }
@@ -138,19 +127,39 @@ class IndexScanPlan : public AbstractScan {
     return index_predicate_;
   }
 
-  const std::vector<common::Value *> &GetValues() const { return values_; }
+  const std::vector<type::Value> &GetValues() const { return values_; }
 
   const std::vector<expression::AbstractExpression *> &GetRunTimeKeys() const {
     return runtime_keys_;
   }
 
   inline PlanNodeType GetPlanNodeType() const {
-    return PLAN_NODE_TYPE_INDEXSCAN;
+    return PlanNodeType::INDEXSCAN;
   }
+
+  inline bool GetLeftOpen() const { return left_open_; }
+
+  inline bool GetRightOpen() const { return right_open_; }
+
+  inline bool GetLimit() const { return limit_; }
+
+  inline int64_t GetLimitNumber() const { return limit_number_; }
+
+  inline int64_t GetLimitOffset() const { return limit_offset_; }
+
+  inline bool GetDescend() const { return descend_; }
 
   const std::string GetInfo() const { return "IndexScan"; }
 
-  void SetParameterValues(std::vector<common::Value *> *values);
+  void SetLimit(bool limit) { limit_ = limit; }
+
+  void SetLimitNumber(int64_t limit) { limit_number_ = limit; }
+
+  void SetLimitOffset(int64_t offset) { limit_offset_ = offset; }
+
+  void SetDescend(bool descend) { descend_ = descend; }
+
+  void SetParameterValues(std::vector<type::Value> *values);
 
   std::unique_ptr<AbstractPlan> Copy() const {
     std::vector<expression::AbstractExpression *> new_runtime_keys;
@@ -161,7 +170,7 @@ class IndexScanPlan : public AbstractScan {
     IndexScanDesc desc(index_, key_column_ids_, expr_types_, values_,
                        new_runtime_keys);
     IndexScanPlan *new_plan = new IndexScanPlan(
-        GetTable(), GetPredicate()->Copy(), GetColumnIds(), desc , false);
+        GetTable(), GetPredicate()->Copy(), GetColumnIds(), desc, false);
     return std::unique_ptr<AbstractPlan>(new_plan);
   }
 
@@ -189,9 +198,9 @@ class IndexScanPlan : public AbstractScan {
   // Note that when binding values to the scan plan we copy those values
   // into this array, which means the lifetime of values being bound is
   // also the lifetime of the IndexScanPlan object
-  std::vector<common::Value *> values_;
+  std::vector<type::Value> values_;
   // the original copy of values with all the value parameters (bind them later)
-  std::vector<common::Value *> values_with_params_;
+  std::vector<type::Value> values_with_params_;
 
   const std::vector<expression::AbstractExpression *> runtime_keys_;
 
@@ -200,6 +209,27 @@ class IndexScanPlan : public AbstractScan {
   // In the future this might be extended into an array of conjunctive
   // predicates connected by disjunction
   index::IndexScanPredicate index_predicate_;
+
+  // whether the index scan range is left open
+  bool left_open_ = false;
+
+  // whether the index scan range is right open
+  bool right_open_ = false;
+
+  // whether it is an order by + limit plan
+  bool limit_ = false;
+
+  // how many tuples should be returned
+  int64_t limit_number_ = 0;
+
+  // offset means from which point
+  int64_t limit_offset_ = 0;
+
+  // whether order by is descending
+  bool descend_ = false;
+
+ private:
+  DISALLOW_COPY_AND_MOVE(IndexScanPlan);
 };
 
 }  // namespace planner

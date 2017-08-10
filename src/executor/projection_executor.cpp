@@ -6,19 +6,18 @@
 //
 // Identification: src/executor/projection_executor.cpp
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #include "executor/projection_executor.h"
 
 #include "planner/projection_plan.h"
 #include "common/logger.h"
-#include "common/types.h"
+#include "type/types.h"
 #include "executor/logical_tile.h"
 #include "executor/logical_tile_factory.h"
-#include "expression/container_tuple.h"
+#include "common/container_tuple.h"
 #include "storage/tile.h"
 #include "storage/data_table.h"
 
@@ -38,7 +37,8 @@ ProjectionExecutor::ProjectionExecutor(const planner::AbstractPlan *node,
  * @return true on success, false otherwise.
  */
 bool ProjectionExecutor::DInit() {
-  PL_ASSERT(children_.size() == 1 || children_.size() == 2);
+  // NOTE: We only handle 1 child or no child for now
+  PL_ASSERT(children_.size() < 2);
 
   // Grab settings from plan node
   const planner::ProjectionPlan &node = GetPlanNode<planner::ProjectionPlan>();
@@ -57,10 +57,36 @@ bool ProjectionExecutor::DInit() {
 bool ProjectionExecutor::DExecute() {
   PL_ASSERT(project_info_);
   PL_ASSERT(schema_);
-  PL_ASSERT(children_.size() == 1);
+  // NOTE: We only handle 1 child or no child for now
+  PL_ASSERT(children_.size() < 2);
 
-  // NOTE: We only handle 1 child for now
-  if (children_.size() == 1) {
+  if (children_.size() == 0) {
+    if (finished_) return false;
+
+    LOG_TRACE("Projection : child 0 ");
+    // Create new physical tile where we store projected tuples
+    std::shared_ptr<storage::Tile> dest_tile(
+        storage::TileFactory::GetTempTile(*schema_, 1));
+
+    // Create projections tuple-at-a-time from original tile
+    storage::Tuple *buffer = new storage::Tuple(schema_, true);
+    project_info_->Evaluate(buffer, nullptr, nullptr, executor_context_);
+
+    // Insert projected tuple into the new tile
+    dest_tile.get()->InsertTuple(0, buffer);
+
+    delete buffer;
+
+    // Wrap physical tile in logical tile and return it
+    SetOutput(LogicalTileFactory::WrapTiles({dest_tile}));
+
+    // Return 1 tuple only, set the finished flag to true
+    finished_ = true;
+
+    return true;
+  }
+
+  else if (children_.size() == 1) {
     LOG_TRACE("Projection : child 1 ");
 
     // Execute child
@@ -79,8 +105,7 @@ bool ProjectionExecutor::DExecute() {
     oid_t new_tuple_id = 0;
     for (oid_t old_tuple_id : *source_tile) {
       storage::Tuple *buffer = new storage::Tuple(schema_, true);
-      expression::ContainerTuple<LogicalTile> tuple(source_tile.get(),
-                                                    old_tuple_id);
+      ContainerTuple<LogicalTile> tuple(source_tile.get(), old_tuple_id);
       project_info_->Evaluate(buffer, &tuple, nullptr, executor_context_);
 
       // Insert projected tuple into the new tile
@@ -99,5 +124,5 @@ bool ProjectionExecutor::DExecute() {
   return false;
 }
 
-} /* namespace executor */
-} /* namespace peloton */
+}  // namespace executor
+}  // namespace peloton

@@ -6,21 +6,20 @@
 //
 // Identification: src/include/executor/logical_tile.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
 #include <iterator>
-#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "common/macros.h"
 #include "common/printable.h"
-#include "common/types.h"
-#include "common/value.h"
+#include "type/types.h"
+#include "type/value.h"
 
 namespace peloton {
 
@@ -82,9 +81,9 @@ class LogicalTile : public Printable {
 
   storage::Tile *GetBaseTile(oid_t column_id);
 
-  common::Value *GetValue(oid_t tuple_id, oid_t column_id);
+  type::Value GetValue(oid_t tuple_id, oid_t column_id);
 
-  void SetValue(common::Value &value, oid_t tuple_id, oid_t column_id);
+  void SetValue(type::Value &value, oid_t tuple_id, oid_t column_id);
 
   size_t GetTupleCount();
 
@@ -107,7 +106,7 @@ class LogicalTile : public Printable {
   void SetPositionListsAndVisibility(PositionLists &&position_lists);
 
   std::vector<std::vector<std::string>> GetAllValuesAsStrings(
-      const std::vector<int> &result_format);
+      const std::vector<int> &result_format, bool use_to_string_null);
 
   // Get a string representation for debugging
   const std::string GetInfo() const;

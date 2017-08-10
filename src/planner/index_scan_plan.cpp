@@ -11,10 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "planner/index_scan_plan.h"
-#include "common/types.h"
 #include "expression/constant_value_expression.h"
 #include "expression/expression_util.h"
 #include "storage/data_table.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace planner {
@@ -42,55 +42,63 @@ IndexScanPlan::IndexScanPlan(storage::DataTable *table,
   SetTargetTable(table);
 
   if (predicate != NULL) {
-    // we need to copy it here because eventually predicate will be destroyed by
-    // its owner...
-    predicate = predicate->Copy();
-    expression::ExpressionUtil::ReplaceColumnExpressions(table->GetSchema(), predicate);
-    predicate_with_params_ =
-        std::unique_ptr<expression::AbstractExpression>(predicate);
-    SetPredicate(predicate_with_params_->Copy());
+    expression::ExpressionUtil::TransformExpression(table->GetSchema(),
+                                                    predicate);
+    SetPredicate(predicate);
   }
 
   // copy the value over for binding purpose
   for (auto val : values_with_params_) {
-    values_.push_back(val->Copy());
+    values_.push_back(val.Copy());
   }
 
   // Then add the only conjunction predicate into the index predicate list
   // (at least for now we only supports single conjunction)
+  //
+  // Values that are left blank will be recorded for future binding
+  // and their offset inside the value array will be remembered
   index_predicate_.AddConjunctionScanPredicate(index_.get(), values_,
                                                key_column_ids_, expr_types_);
+
+  // Check whether the scan range is left/right open. Because the index itself
+  // is not able to handle that exactly, we must have extra logic in
+  // IndexScanExecutor to handle that case.
+  //
+  // TODO: We may also need a flag for "IN" expression after we support "IN".
+  for (auto expr_type : expr_types_) {
+    if (expr_type == ExpressionType::COMPARE_GREATERTHAN) left_open_ = true;
+
+    if (expr_type == ExpressionType::COMPARE_LESSTHAN) right_open_ = true;
+  }
 
   return;
 }
 
-void IndexScanPlan::SetParameterValues(std::vector<common::Value *> *values) {
+/*
+ * SetParameterValues() - Late binding for arguments specified in the
+ *                        constructor
+ *
+ * 1. Do not use this function to change a field in the index key!!!!
+ * 2. Only fields specified by the constructor could be modofied
+ */
+void IndexScanPlan::SetParameterValues(std::vector<type::Value> *values) {
   LOG_TRACE("Setting parameter values in Index Scans");
-
-  auto where = predicate_with_params_->Copy();
-  expression::ExpressionUtil::ConvertParameterExpressions(
-      where, values, GetTable()->GetSchema());
-  SetPredicate(where);
 
   // Destroy the values of the last plan and copy the original values over for
   // binding
-  for (auto val : values_) {
-    delete val;
-  }
   values_.clear();
   for (auto val : values_with_params_) {
-    values_.push_back(val->Copy());
+    values_.push_back(val.Copy());
   }
 
   for (unsigned int i = 0; i < values_.size(); ++i) {
     auto value = values_[i];
     auto column_id = key_column_ids_[i];
-    if (value->GetTypeId() == common::Type::PARAMETER_OFFSET) {
-      int offset = value->GetAs<int32_t>();
-      delete value;
+    if (value.GetTypeId() == type::TypeId::PARAMETER_OFFSET) {
+      int offset = value.GetAs<int32_t>();
       values_[i] =
           (values->at(offset))
-              ->CastAs(GetTable()->GetSchema()->GetColumn(column_id).GetType());
+              .CastAs(GetTable()->GetSchema()->GetColumn(column_id).GetType());
     }
   }
 

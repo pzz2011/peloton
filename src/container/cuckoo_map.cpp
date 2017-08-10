@@ -17,7 +17,7 @@
 #include "container/cuckoo_map.h"
 #include "common/logger.h"
 #include "common/macros.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 
@@ -100,4 +100,4 @@ template class CuckooMap<std::thread::id,
 
 template class CuckooMap<oid_t, std::shared_ptr<stats::IndexMetric>>;
 
-}  // End peloton namespace
+}  // namespace peloton

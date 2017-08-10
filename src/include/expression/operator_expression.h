@@ -10,10 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include "expression/abstract_expression.h"
+#include "common/sql_node_visitor.h"
+#include "type/value_factory.h"
+
 
 namespace peloton {
 namespace expression {
@@ -22,80 +24,99 @@ namespace expression {
 // OperatorExpression
 //===----------------------------------------------------------------------===//
 
-using namespace peloton::common;
-
 class OperatorExpression : public AbstractExpression {
  public:
-  OperatorExpression(ExpressionType type, Type::TypeId type_id)
-    : AbstractExpression(type, type_id) {}
+  OperatorExpression(ExpressionType type, type::TypeId type_id)
+      : AbstractExpression(type, type_id) {}
 
-  OperatorExpression(ExpressionType type,
-                     Type::TypeId type_id,
-                     AbstractExpression *left,
-                     AbstractExpression *right)
-    : AbstractExpression(type, type_id, left, right) {}
+  OperatorExpression(ExpressionType type, type::TypeId type_id,
+                     AbstractExpression *left, AbstractExpression *right)
+      : AbstractExpression(type, type_id, left, right) {}
 
-  std::unique_ptr<Value> Evaluate(UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
+  type::Value Evaluate(
+      UNUSED_ATTRIBUTE const AbstractTuple *tuple1,
       UNUSED_ATTRIBUTE const AbstractTuple *tuple2,
       UNUSED_ATTRIBUTE executor::ExecutorContext *context) const override {
-    if (exp_type_ == EXPRESSION_TYPE_OPERATOR_NOT) {
-      auto vl = left_->Evaluate(tuple1, tuple2, context);
-      if (vl->IsTrue())
-        return std::unique_ptr<Value>(new BooleanValue(0));
-      else if (vl->IsFalse())
-        return std::unique_ptr<Value>(new BooleanValue(1));
+    if (exp_type_ == ExpressionType::OPERATOR_NOT) {
+      PL_ASSERT(children_.size() == 1);
+      type::Value vl = children_[0]->Evaluate(tuple1, tuple2, context);
+      if (vl.IsTrue())
+        return (type::ValueFactory::GetBooleanValue(false));
+      else if (vl.IsFalse())
+        return (type::ValueFactory::GetBooleanValue(true));
       else
-        return std::unique_ptr<Value>(new BooleanValue(PELOTON_BOOLEAN_NULL));
+        return (
+            type::ValueFactory::GetBooleanValue(type::PELOTON_BOOLEAN_NULL));
     }
-    auto eval1 = left_->Evaluate(tuple1, tuple2, context);
-    auto vl = std::unique_ptr<NumericValue>(static_cast<NumericValue *>(
-        eval1.get()));
-    eval1.release();
-    auto eval2 = right_->Evaluate(tuple1, tuple2, context);
-    auto vr = std::unique_ptr<NumericValue>(static_cast<NumericValue *>(
-        eval2.get()));
-    eval2.release();
+    PL_ASSERT(children_.size() == 2);
+    type::Value vl = children_[0]->Evaluate(tuple1, tuple2, context);
+    type::Value vr = children_[1]->Evaluate(tuple1, tuple2, context);
+
     switch (exp_type_) {
-      case (EXPRESSION_TYPE_OPERATOR_PLUS):
-        return std::unique_ptr<Value>(vl->Add(*vr));
-      case (EXPRESSION_TYPE_OPERATOR_MINUS):
-        return std::unique_ptr<Value>(vl->Subtract(*vr));
-      case (EXPRESSION_TYPE_OPERATOR_MULTIPLY):
-        return std::unique_ptr<Value>(vl->Multiply(*vr));
-      case (EXPRESSION_TYPE_OPERATOR_DIVIDE):
-        return std::unique_ptr<Value>(vl->Divide(*vr));
-      case (EXPRESSION_TYPE_OPERATOR_MOD):
-        return std::unique_ptr<Value>(vl->Modulo(*vr));
+      case (ExpressionType::OPERATOR_PLUS):
+        return (vl.Add(vr));
+      case (ExpressionType::OPERATOR_MINUS):
+        return (vl.Subtract(vr));
+      case (ExpressionType::OPERATOR_MULTIPLY):
+        return (vl.Multiply(vr));
+      case (ExpressionType::OPERATOR_DIVIDE):
+        return (vl.Divide(vr));
+      case (ExpressionType::OPERATOR_MOD):
+        return (vl.Modulo(vr));
       default:
         throw Exception("Invalid operator expression type.");
     }
   }
 
-  AbstractExpression *Copy() const override {
-    return new OperatorExpression(exp_type_, value_type_,
-                                  left_ ? left_->Copy() : nullptr,
-                                  right_ ? right_->Copy() :nullptr);
+  void DeduceExpressionType() override {
+    // if we are a decimal or int we should take the highest type id of both
+    // children
+    // This relies on a particular order in types.h
+    if (exp_type_ == ExpressionType::OPERATOR_NOT) {
+      return_value_type_ = type::TypeId::BOOLEAN;
+      return;
+    }
+      auto type =
+        std::max(children_[0]->GetValueType(), children_[1]->GetValueType());
+    PL_ASSERT(type <= type::TypeId::DECIMAL);
+    return_value_type_ = type;
   }
+
+  AbstractExpression *Copy() const override {
+    return new OperatorExpression(*this);
+  }
+
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
+ protected:
+  OperatorExpression(const OperatorExpression &other)
+      : AbstractExpression(other) {}
 };
 
 class OperatorUnaryMinusExpression : public AbstractExpression {
  public:
   OperatorUnaryMinusExpression(AbstractExpression *left)
-      : AbstractExpression(EXPRESSION_TYPE_OPERATOR_UNARY_MINUS,
+      : AbstractExpression(ExpressionType::OPERATOR_UNARY_MINUS,
                            left->GetValueType(), left, nullptr) {}
 
-  std::unique_ptr<Value> Evaluate(const AbstractTuple *tuple1,
-                                  const AbstractTuple *tuple2,
-                 executor::ExecutorContext *context) const override {
-    auto vl = left_->Evaluate(tuple1, tuple2, context);
-    std::unique_ptr<NumericValue> zero(new IntegerValue(0));
-    return std::unique_ptr<Value>(zero->Subtract(*vl));
+  type::Value Evaluate(const AbstractTuple *tuple1, const AbstractTuple *tuple2,
+                       executor::ExecutorContext *context) const override {
+    PL_ASSERT(children_.size() == 1);
+    auto vl = children_[0]->Evaluate(tuple1, tuple2, context);
+    type::Value zero(type::ValueFactory::GetIntegerValue(0));
+    return zero.Subtract(vl);
   }
 
   AbstractExpression *Copy() const override {
-    return new OperatorUnaryMinusExpression(left_->Copy());
+    return new OperatorUnaryMinusExpression(*this);
   }
+
+  virtual void Accept(SqlNodeVisitor *v) override { v->Visit(this); }
+
+ protected:
+  OperatorUnaryMinusExpression(const OperatorUnaryMinusExpression &other)
+      : AbstractExpression(other) {}
 };
 
-}  // End expression namespace
-}  // End peloton namespace
+}  // namespace expression
+}  // namespace peloton

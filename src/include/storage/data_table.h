@@ -12,23 +12,18 @@
 
 #pragma once
 
-#include <memory>
-#include <queue>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <queue>
 #include <set>
 
+#include "common/item_pointer.h"
 #include "common/platform.h"
-#include "storage/abstract_table.h"
 #include "container/lock_free_array.h"
 #include "index/index.h"
+#include "storage/abstract_table.h"
 #include "storage/indirection_array.h"
-
-//===--------------------------------------------------------------------===//
-// GUC Variables
-//===--------------------------------------------------------------------===//
-
-extern LayoutType peloton_layout_mode;
 
 //===--------------------------------------------------------------------===//
 // Configuration Variables
@@ -36,10 +31,7 @@ extern LayoutType peloton_layout_mode;
 
 extern std::vector<peloton::oid_t> sdbench_column_ids;
 
-
 namespace peloton {
-
-typedef std::map<oid_t, std::pair<oid_t, oid_t>> column_map_type;
 
 namespace brain {
 class Sample;
@@ -66,8 +58,6 @@ namespace storage {
 class Tuple;
 class TileGroup;
 class IndirectionArray;
-
-
 
 //===--------------------------------------------------------------------===//
 // DataTable
@@ -96,7 +86,7 @@ class DataTable : public AbstractTable {
   DataTable(catalog::Schema *schema, const std::string &table_name,
             const oid_t &database_oid, const oid_t &table_oid,
             const size_t &tuples_per_tilegroup, const bool own_schema,
-            const bool adapt_table);
+            const bool adapt_table, const bool is_catalog = false);
 
   ~DataTable();
 
@@ -105,19 +95,30 @@ class DataTable : public AbstractTable {
   //===--------------------------------------------------------------------===//
   // insert an empty version in table. designed for delete operation.
   ItemPointer InsertEmptyVersion();
-  
-  // these two functions are designed for reducing memory allocation by performing in-place update.
-  // in the update executor, we first acquire a version slot from the data table, and then
-  // copy the content into the version. after that, we need to check constraints and then install the version
+
+  // these two functions are designed for reducing memory allocation by
+  // performing in-place update.
+  // in the update executor, we first acquire a version slot from the data
+  // table, and then
+  // copy the content into the version. after that, we need to check constraints
+  // and then install the version
   // into all the corresponding indexes.
   ItemPointer AcquireVersion();
-  // install an version in table. designed for update operation.
-  // as we implement logical-pointer indexing mechanism, targets_ptr is required.
-  bool InstallVersion(const AbstractTuple *tuple, const TargetList *targets_ptr, ItemPointer *index_entry_ptr);
 
-  // insert tuple in table. the pointer to the index entry is returned as index_entry_ptr.
-  ItemPointer InsertTuple(const Tuple *tuple, concurrency::Transaction *transaction, ItemPointer **index_entry_ptr = nullptr);
-  // designed for tables without primary key. e.g., output table used by aggregate_executor.
+  // install an version in table. designed for update operation.
+  // as we implement logical-pointer indexing mechanism, targets_ptr is
+  // required.
+  bool InstallVersion(const AbstractTuple *tuple, const TargetList *targets_ptr,
+                      concurrency::Transaction *transaction,
+                      ItemPointer *index_entry_ptr);
+
+  // insert tuple in table. the pointer to the index entry is returned as
+  // index_entry_ptr.
+  ItemPointer InsertTuple(const Tuple *tuple,
+                          concurrency::Transaction *transaction,
+                          ItemPointer **index_entry_ptr = nullptr);
+  // designed for tables without primary key. e.g., output table used by
+  // aggregate_executor.
   ItemPointer InsertTuple(const Tuple *tuple);
 
   //===--------------------------------------------------------------------===//
@@ -153,11 +154,15 @@ class DataTable : public AbstractTable {
 
   void DropIndexWithOid(const oid_t &index_oid);
 
+  void DropIndexes();
+
   std::shared_ptr<index::Index> GetIndex(const oid_t &index_offset);
 
   std::set<oid_t> GetIndexAttrs(const oid_t &index_offset) const;
 
   oid_t GetIndexCount() const;
+
+  oid_t GetValidIndexCount() const;
 
   const std::vector<std::set<oid_t>> &GetIndexColumns() const {
     return indexes_columns_;
@@ -204,11 +209,13 @@ class DataTable : public AbstractTable {
 
   void RecordLayoutSample(const brain::Sample &sample);
 
-  const std::vector<brain::Sample> &GetLayoutSamples() const;
+  std::vector<brain::Sample> GetLayoutSamples();
 
   void ClearLayoutSamples();
 
   void SetDefaultLayout(const column_map_type &layout);
+
+  column_map_type GetDefaultLayout() const;
 
   //===--------------------------------------------------------------------===//
   // INDEX TUNER
@@ -216,7 +223,7 @@ class DataTable : public AbstractTable {
 
   void RecordIndexSample(const brain::Sample &sample);
 
-  const std::vector<brain::Sample> &GetIndexSamples() const;
+  std::vector<brain::Sample> GetIndexSamples();
 
   void ClearIndexSamples();
 
@@ -224,36 +231,37 @@ class DataTable : public AbstractTable {
   // UTILITIES
   //===--------------------------------------------------------------------===//
 
-  bool HasPrimaryKey() { return has_primary_key_; }
+  // deprecated, use catalog::TableCatalog::GetInstance()->GetTableName()
+  inline std::string GetName() const { return (table_name); }
 
-  bool HasUniqueConstraints() { return (unique_constraint_count_ > 0); }
+  // deprecated, use catalog::TableCatalog::GetInstance()->GetDatabaseOid()
+  inline oid_t GetDatabaseOid() const { return (database_oid); }
 
-  bool HasForeignKeys() { return (GetForeignKeyCount() > 0); }
+  bool HasPrimaryKey() const { return (has_primary_key_); }
+
+  bool HasUniqueConstraints() const { return (unique_constraint_count_ > 0); }
+
+  bool HasForeignKeys() const { return (GetForeignKeyCount() > 0); }
 
   std::map<oid_t, oid_t> GetColumnMapStats();
 
-  // Get a string representation for debugging
-  const std::string GetInfo() const;
-
   // try to insert into all indexes.
-  // the last argument is the index entry in primary index holding the new tuple.
-  bool InsertInIndexes(const storage::Tuple *tuple, 
-                       ItemPointer location, 
-                       concurrency::Transaction *transaction, 
+  // the last argument is the index entry in primary index holding the new
+  // tuple.
+  bool InsertInIndexes(const storage::Tuple *tuple, ItemPointer location,
+                       concurrency::Transaction *transaction,
                        ItemPointer **index_entry_ptr);
 
-
-
   static void SetActiveTileGroupCount(const size_t active_tile_group_count) {
-    active_tilegroup_count_ = active_tile_group_count;
+    default_active_tilegroup_count_ = active_tile_group_count;
   }
 
-  static void SetActiveIndirectionArrayCount(const size_t active_indirection_array_count) {
-    active_indirection_array_count_ = active_indirection_array_count;
+  static void SetActiveIndirectionArrayCount(
+      const size_t active_indirection_array_count) {
+    default_active_indirection_array_count_ = active_indirection_array_count;
   }
 
  protected:
-
   //===--------------------------------------------------------------------===//
   // INTEGRITY CHECKS
   //===--------------------------------------------------------------------===//
@@ -267,13 +275,11 @@ class DataTable : public AbstractTable {
 
   // add a tile group to the table
   oid_t AddDefaultTileGroup();
-  // add a tile group to the table. replace the active_tile_group_id-th active tile group.
+  // add a tile group to the table. replace the active_tile_group_id-th active
+  // tile group.
   oid_t AddDefaultTileGroup(const size_t &active_tile_group_id);
 
   oid_t AddDefaultIndirectionArray(const size_t &active_indirection_array_id);
-  
-  // get a partitioning with given layout type
-  column_map_type GetTileGroupLayout(LayoutType layout_type);
 
   // Drop all tile groups of the table. Used by recovery
   void DropTileGroups();
@@ -282,22 +288,31 @@ class DataTable : public AbstractTable {
   // INDEX HELPERS
   //===--------------------------------------------------------------------===//
 
-  bool InsertInSecondaryIndexes(const AbstractTuple *tuple, 
-                                const TargetList *targets_ptr, 
+  bool InsertInSecondaryIndexes(const AbstractTuple *tuple,
+                                const TargetList *targets_ptr,
+                                concurrency::Transaction *transaction,
                                 ItemPointer *index_entry_ptr);
 
   // check the foreign key constraints
   bool CheckForeignKeyConstraints(const storage::Tuple *tuple);
 
-public:
-  static size_t active_tilegroup_count_;
+ public:
+  static size_t default_active_tilegroup_count_;
 
-  static size_t active_indirection_array_count_;
+  static size_t default_active_indirection_array_count_;
 
  private:
   //===--------------------------------------------------------------------===//
   // MEMBERS
   //===--------------------------------------------------------------------===//
+
+  size_t active_tilegroup_count_;
+  size_t active_indirection_array_count_;
+
+  const oid_t database_oid;
+
+  // deprecated, use catalog::TableCatalog::GetInstance()->GetTableName()
+  std::string table_name;
 
   // number of tuples allocated per tilegroup
   size_t tuples_per_tilegroup_;
@@ -310,7 +325,8 @@ public:
   std::atomic<size_t> tile_group_count_ = ATOMIC_VAR_INIT(0);
 
   // INDIRECTIONS
-  std::vector<std::shared_ptr<storage::IndirectionArray>> active_indirection_arrays_;
+  std::vector<std::shared_ptr<storage::IndirectionArray>>
+      active_indirection_arrays_;
 
   // data table mutex
   std::mutex data_table_mutex_;
@@ -330,7 +346,8 @@ public:
   // # of unique constraints
   std::atomic<oid_t> unique_constraint_count_ = ATOMIC_VAR_INIT(START_OID);
 
-  // # of tuples. must be atomic as multiple transactions can perform insert concurrently.
+  // # of tuples. must be atomic as multiple transactions can perform insert
+  // concurrently.
   std::atomic<size_t> number_of_tuples_ = ATOMIC_VAR_INIT(0);
 
   // dirty flag. for detecting whether the tile group has been used.
@@ -361,5 +378,5 @@ public:
   static oid_t invalid_tile_group_id;
 };
 
-}  // End storage namespace
-}  // End peloton namespace
+}  // namespace storage
+}  // namespace peloton

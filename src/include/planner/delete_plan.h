@@ -6,27 +6,19 @@
 //
 // Identification: src/include/planner/delete_plan.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
-#include "catalog/schema.h"
-#include "common/types.h"
-#include "parser/table_ref.h"
 #include "planner/abstract_plan.h"
+#include "type/types.h"
 
 namespace peloton {
 
-namespace parser {
-class DeleteStatement;
-}
 namespace storage {
 class DataTable;
-}
-namespace expression {
-class Expression;
 }
 
 namespace planner {
@@ -34,53 +26,28 @@ namespace planner {
 class DeletePlan : public AbstractPlan {
  public:
   DeletePlan() = delete;
-  DeletePlan(const DeletePlan &) = delete;
-  DeletePlan &operator=(const DeletePlan &) = delete;
-  DeletePlan(DeletePlan &&) = delete;
-  DeletePlan &operator=(DeletePlan &&) = delete;
 
-  ~DeletePlan() {
-    if (expr_ != nullptr) {
-      delete expr_;
-    }
-  }
+  ~DeletePlan() {}
 
-  explicit DeletePlan(storage::DataTable *table, bool truncate);
-
-  explicit DeletePlan(parser::DeleteStatement *parse_tree);
-
-  explicit DeletePlan(parser::DeleteStatement *delete_statemenet,
-                      std::vector<oid_t> &key_column_ids,
-                      std::vector<ExpressionType> &expr_types,
-                      std::vector<common::Value *> &values, oid_t &index_id);
-
-  inline PlanNodeType GetPlanNodeType() const { return PLAN_NODE_TYPE_DELETE; }
+  DeletePlan(storage::DataTable *table);
 
   storage::DataTable *GetTable() const { return target_table_; }
 
-  const std::string GetInfo() const { return "DeletePlan"; }
+  PlanNodeType GetPlanNodeType() const override { return PlanNodeType::DELETE; }
 
-  void SetParameterValues(std::vector<common::Value *> *values) override;
+  const std::string GetInfo() const override { return "DeletePlan"; }
 
-  bool GetTruncate() const { return truncate; }
+  void SetParameterValues(std::vector<type::Value> *values) override;
 
-  std::unique_ptr<AbstractPlan> Copy() const {
-    return std::unique_ptr<AbstractPlan>(
-        new DeletePlan(target_table_, truncate));
+  std::unique_ptr<AbstractPlan> Copy() const override {
+    return std::unique_ptr<AbstractPlan>(new DeletePlan(target_table_));
   }
 
  private:
-  void BuildInitialDeletePlan(parser::DeleteStatement *delete_statemenet);
-
-  /** @brief Target table. */
   storage::DataTable *target_table_ = nullptr;
 
-  std::string table_name_;
-
-  expression::AbstractExpression *expr_ = nullptr;
-
-  /** @brief Truncate table. */
-  bool truncate = false;
+ private:
+  DISALLOW_COPY_AND_MOVE(DeletePlan);
 };
 
 }  // namespace planner

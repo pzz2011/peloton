@@ -14,7 +14,7 @@
 
 #include "parser/statements.h"
 #include "expression/abstract_expression.h"
-#include "common/types.h"
+#include "type/types.h"
 
 namespace peloton {
 namespace parser {
@@ -22,8 +22,10 @@ namespace parser {
 void GetSelectStatementInfo(SelectStatement* stmt, uint num_indent);
 void GetInsertStatementInfo(InsertStatement* stmt, uint num_indent);
 void GetCreateStatementInfo(CreateStatement* stmt, uint num_indent);
+void GetDeleteStatementInfo(DeleteStatement* stmt, uint num_indent);
 void GetExpressionInfo(const expression::AbstractExpression* expr,
                        uint num_indent);
+std::string CharsToStringDestructive(char * str);
 
-}  // End parser namespace
-}  // End peloton namespace
+}  // namespace parser
+}  // namespace peloton

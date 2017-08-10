@@ -11,8 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 
+#include "concurrency/testing_transaction_util.h"
 #include "common/harness.h"
-#include "concurrency/transaction_tests_util.h"
 
 namespace peloton {
 
@@ -25,9 +25,9 @@ namespace test {
 class TimestampOrderingTransactionManagerTests : public PelotonTest {};
 
 TEST_F(TimestampOrderingTransactionManagerTests, Test) {
-  concurrency::TransactionManagerFactory::Configure(CONCURRENCY_TYPE_TIMESTAMP_ORDERING);
+  concurrency::TransactionManagerFactory::Configure(ProtocolType::TIMESTAMP_ORDERING);
   EXPECT_TRUE(true);
 }
 
-}  // End test namespace
-}  // End peloton namespace
+}  // namespace test
+}  // namespace peloton

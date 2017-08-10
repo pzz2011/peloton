@@ -24,6 +24,8 @@
 
 #include "parser/sql_statement.h"
 
+#include <sstream>
+
 #include "parser/parser_utils.h"
 
 namespace peloton {
@@ -36,24 +38,25 @@ namespace parser {
 const std::string SQLStatement::GetInfo() const {
   std::ostringstream os;
 
-  os << "STATEMENT : Type :: " << stmt_type << "\n";
+  os << "SQLStatement[" << StatementTypeToString(stmt_type) << "]\n";
 
   int indent = 1;
-
   switch (stmt_type) {
-    case STATEMENT_TYPE_SELECT:
+    case StatementType::SELECT:
       GetSelectStatementInfo((SelectStatement*)this, indent);
       break;
-    case STATEMENT_TYPE_INSERT:
+    case StatementType::INSERT:
       GetInsertStatementInfo((InsertStatement*)this, indent);
       break;
-    case STATEMENT_TYPE_CREATE:
+    case StatementType::CREATE:
       GetCreateStatementInfo((CreateStatement*)this, indent);
+      break;
+    case StatementType::DELETE:
+      GetDeleteStatementInfo((DeleteStatement*)this, indent);
       break;
     default:
       break;
   }
-
   return os.str();
 }
 
@@ -64,13 +67,12 @@ const std::string SQLStatementList::GetInfo() const {
     for (auto stmt : statements) {
       os << stmt->GetInfo();
     }
-  }
-  else {
+  } else {
     os << "Invalid statement list \n";
   }
 
   return os.str();
 }
 
-}  // End parser namespace
-}  // End peloton namespace
+}  // namespace parser
+}  // namespace peloton

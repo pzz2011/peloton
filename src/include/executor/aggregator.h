@@ -6,20 +6,19 @@
 //
 // Identification: src/include/executor/aggregator.h
 //
-// Copyright (c) 2015-16, Carnegie Mellon University Database Group
+// Copyright (c) 2015-17, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
-
 
 #pragma once
 
 #include <unordered_map>
 #include <unordered_set>
 
-#include "common/value_factory.h"
+#include "common/container_tuple.h"
 #include "executor/abstract_executor.h"
 #include "planner/aggregate_plan.h"
-#include "expression/container_tuple.h"
+#include "type/value_factory.h"
 
 //===--------------------------------------------------------------------===//
 // Aggregate
@@ -28,7 +27,7 @@
 namespace peloton {
 
 namespace storage {
-class DataTable;
+class AbstractTable;
 }
 
 namespace executor {
@@ -37,20 +36,21 @@ namespace executor {
  * Base class for an individual aggregate that aggregates a specific
  * column for a group
  */
-class Agg {
+class AbstractAttributeAggregator {
  public:
-  virtual ~Agg();
+  virtual ~AbstractAttributeAggregator();
 
   void SetDistinct(bool distinct) { is_distinct_ = distinct; }
 
-  void Advance(const common::Value *val);
-  common::Value *Finalize();
+  void Advance(const type::Value val);
+  type::Value Finalize();
 
-  virtual void DAdvance(const common::Value *val) = 0;
-  virtual common::Value *DFinalize() = 0;
+  virtual void DAdvance(const type::Value &val) = 0;
+  virtual type::Value DFinalize() = 0;
 
  private:
-  typedef std::unordered_set<common::Value *, common::Value::hash, common::Value::equal_to>
+  typedef std::unordered_set<type::Value, type::Value::hash,
+                             type::Value::equal_to>
       DistinctSetType;
 
   DistinctSetType distinct_set_;
@@ -58,90 +58,83 @@ class Agg {
   bool is_distinct_ = false;
 };
 
-class SumAgg : public Agg {
+class SumAggregator : public AbstractAttributeAggregator {
  public:
-  SumAgg() : have_advanced(false) {
+  SumAggregator() : have_advanced(false) {
     // aggregate initialized on first advance
   }
 
-  void DAdvance(const common::Value *val) {
-    if (val->IsNull()) {
+  void DAdvance(const type::Value &val) {
+    if (val.IsNull()) {
       return;
     }
     if (!have_advanced) {
-      aggregate.reset(static_cast<common::NumericValue *>(val->Copy()));
+      aggregate = val.Copy();
       have_advanced = true;
     } else {
-      aggregate.reset(static_cast<common::NumericValue *>(aggregate->Add(*val)));
+      aggregate = aggregate.Add(val);
     }
   }
 
-  common::Value *DFinalize() {
+  type::Value DFinalize() {
     if (!have_advanced)
-      return common::ValueFactory::GetNullValueByType(common::Type::INTEGER);
-    return aggregate.release();
+      return type::ValueFactory::GetNullValueByType(type::TypeId::INTEGER);
+    return aggregate;
   }
 
  private:
-  std::unique_ptr<common::NumericValue> aggregate;
+  type::Value aggregate;
 
   bool have_advanced;
 };
 
-class AvgAgg : public Agg {
+class AvgAggregator : public AbstractAttributeAggregator {
  public:
-  AvgAgg(bool is_weighted) : is_weighted(is_weighted), count(0) {
-    default_delta.reset(static_cast<common::NumericValue *>(
-        common::ValueFactory::GetIntegerValue(1).Copy()));
+  AvgAggregator(bool is_weighted) : is_weighted(is_weighted), count(0) {
+    default_delta = type::ValueFactory::GetIntegerValue(1);
   }
 
-  void DAdvance(const common::Value *val) { 
-    this->DAdvance(val, default_delta.get());
-  }
+  void DAdvance(const type::Value &val) { this->DAdvance(val, default_delta); }
 
-  void DAdvance(const common::Value *val, const common::Value *delta) {
-    if (val->IsNull()) {
+  void DAdvance(const type::Value &val, const type::Value &delta) {
+    if (val.IsNull()) {
       return;
     }
 
     // Weighted average
     if (is_weighted) {
-      std::unique_ptr<common::Value> weighted_val(
-          static_cast<const common::NumericValue *>(val)->Multiply(*delta));
+      type::Value weighted_val = val.Multiply(delta);
       if (count == 0) {
-        aggregate.reset(static_cast<common::NumericValue *>(
-            weighted_val.release()));
+        aggregate = weighted_val;
       } else {
-        aggregate.reset(static_cast<common::NumericValue *>(
-            aggregate->Add(*weighted_val)));
+        aggregate = aggregate.Add(weighted_val);
       }
-      count += common::ValuePeeker::PeekInteger(delta);
+      count += type::ValuePeeker::PeekInteger(delta);
     } else {
       if (count == 0) {
-        aggregate.reset(static_cast<common::NumericValue *>(val->Copy()));
+        aggregate = val.Copy();
       } else {
-        aggregate.reset(static_cast<common::NumericValue *>(
-            aggregate->Add(*val)));
+        aggregate = aggregate.Add(val);
       }
       count += 1;
     }
   }
 
-  common::Value *DFinalize() {
+  type::Value DFinalize() {
     if (count == 0) {
-      return common::ValueFactory::GetNullValueByType(common::Type::INTEGER);
+      return type::ValueFactory::GetNullValueByType(type::TypeId::INTEGER);
     }
-    common::Value *final_result = aggregate->Divide(
-        common::ValueFactory::GetDoubleValue(static_cast<double>(count)));
+    type::Value final_result = aggregate.Divide(
+        type::ValueFactory::GetDecimalValue(static_cast<double>(count)));
     return final_result;
   }
 
  private:
   /** @brief aggregate initialized on first advance. */
-  std::unique_ptr<common::NumericValue> aggregate;
+  type::Value aggregate;
 
   /** @brief  default delta for weighted average */
-  std::unique_ptr<common::NumericValue> default_delta;
+  type::Value default_delta;
 
   bool is_weighted;
 
@@ -150,103 +143,94 @@ class AvgAgg : public Agg {
 };
 
 // count always holds integer
-class CountAgg : public Agg {
+class CountAggregator : public AbstractAttributeAggregator {
  public:
-  CountAgg() : count(0) {}
+  CountAggregator() : count(0) {}
 
-  void DAdvance(const common::Value *val) {
-    if (val->IsNull()) {
+  void DAdvance(const type::Value &val) {
+    if (val.IsNull()) {
       return;
     }
     count++;
   }
 
-  common::Value *DFinalize() {
-    return common::ValueFactory::GetBigIntValue(count).Copy();
-  }
+  type::Value DFinalize() { return type::ValueFactory::GetBigIntValue(count); }
 
  private:
   int64_t count;
 };
 
-class CountStarAgg : public Agg {
+class CountStarAggregator : public AbstractAttributeAggregator {
  public:
-  CountStarAgg() : count(0) {}
+  CountStarAggregator() : count(0) {}
 
-  void DAdvance(const common::Value *val UNUSED_ATTRIBUTE) { ++count; }
+  void DAdvance(const type::Value &val UNUSED_ATTRIBUTE) { ++count; }
 
-  common::Value *DFinalize() {
-    return common::ValueFactory::GetBigIntValue(count).Copy();
-  }
+  type::Value DFinalize() { return type::ValueFactory::GetBigIntValue(count); }
 
  private:
   int64_t count;
 };
 
-class MaxAgg : public Agg {
+class MaxAggregator : public AbstractAttributeAggregator {
  public:
-  MaxAgg() : have_advanced(false) {
-    aggregate.reset(static_cast<common::NumericValue *>(
-        common::ValueFactory::GetNullValueByType(common::Type::INTEGER)));
+  MaxAggregator() : have_advanced(false) {
+    aggregate = type::ValueFactory::GetNullValueByType(type::TypeId::INTEGER);
   }
 
-  void DAdvance(const common::Value *val) {
-    if (val->IsNull()) {
+  void DAdvance(const type::Value &val) {
+    if (val.IsNull()) {
       return;
     }
     if (!have_advanced) {
-      aggregate.reset(static_cast<common::NumericValue *>(val->Copy()));
+      aggregate = val.Copy();
       have_advanced = true;
     } else {
-      aggregate.reset(static_cast<common::NumericValue *>(aggregate->Max(*val)));
+      aggregate = aggregate.Max(val);
     }
   }
 
-  common::Value *DFinalize() {
-    return aggregate.release();
-  }
+  type::Value DFinalize() { return aggregate; }
 
  private:
-  std::unique_ptr<common::NumericValue> aggregate;
+  type::Value aggregate;
 
   bool have_advanced;
 };
 
-class MinAgg : public Agg {
+class MinAggregator : public AbstractAttributeAggregator {
  public:
-  MinAgg() : have_advanced(false) {
-    aggregate.reset(static_cast<common::NumericValue *>(
-        common::ValueFactory::GetNullValueByType(common::Type::INTEGER)));
+  MinAggregator() : have_advanced(false) {
+    aggregate = type::ValueFactory::GetNullValueByType(type::TypeId::INTEGER);
   }
 
-  void DAdvance(const common::Value *val) {
-    if (val->IsNull()) {
+  void DAdvance(const type::Value &val) {
+    if (val.IsNull()) {
       return;
     }
 
     if (!have_advanced) {
-      aggregate.reset(static_cast<common::NumericValue *>(val->Copy()));
+      aggregate = val.Copy();
       have_advanced = true;
     } else {
-      aggregate.reset(static_cast<common::NumericValue *>(aggregate->Min(*val)));
+      aggregate = aggregate.Min(val);
     }
   }
 
-  common::Value *DFinalize() {
-    return aggregate.release();
-  }
+  type::Value DFinalize() { return aggregate; }
 
  private:
-  std::unique_ptr<common::NumericValue> aggregate;
+  type::Value aggregate;
 
   bool have_advanced;
 };
 
 /** brief Create an instance of an aggregator for the specified aggregate */
-Agg *GetAggInstance(ExpressionType agg_type);
+AbstractAttributeAggregator *GetAttributeAggregatorInstance(
+    ExpressionType agg_type);
 
 /*
- * Interface for an aggregator (not an an individual aggregate)
+ * Interface for an aggregator (not an an individual attribute aggregate)
  *
  * This will aggregate some number of tuples and produce the results in the
  * provided output .
@@ -254,7 +238,7 @@ Agg *GetAggInstance(ExpressionType agg_type);
 class AbstractAggregator {
  public:
   AbstractAggregator(const planner::AggregatePlan *node,
-                     storage::DataTable *output_table,
+                     storage::AbstractTable *output_table,
                      executor::ExecutorContext *econtext)
       : node(node), output_table(output_table), executor_context(econtext) {}
 
@@ -269,7 +253,7 @@ class AbstractAggregator {
   const planner::AggregatePlan *node;
 
   /** @brief Output table */
-  storage::DataTable *output_table;
+  storage::AbstractTable *output_table;
 
   /** @brief Executor Context */
   executor::ExecutorContext *executor_context = nullptr;
@@ -282,7 +266,7 @@ class AbstractAggregator {
 class HashAggregator : public AbstractAggregator {
  public:
   HashAggregator(const planner::AggregatePlan *node,
-                 storage::DataTable *output_table,
+                 storage::AbstractTable *output_table,
                  executor::ExecutorContext *econtext, size_t num_input_columns);
 
   bool Advance(AbstractTuple *next_tuple) override;
@@ -297,45 +281,43 @@ class HashAggregator : public AbstractAggregator {
   /** List of aggregates for a specific group. */
   struct AggregateList {
     // Keep a deep copy of the first tuple we met of this group
-    std::vector<common::Value *> first_tuple_values;
+    std::vector<type::Value> first_tuple_values;
 
     // The aggregates for each column for this group
-    Agg **aggregates;
+    AbstractAttributeAggregator **aggregates;
   };
 
   /** Hash function of internal hash table */
   struct ValueVectorHasher
-      : std::unary_function<std::vector<common::Value *>, std::size_t> {
+      : std::unary_function<std::vector<type::Value>, std::size_t> {
     // Generate a 64-bit number for the a vector of value
-    size_t operator()(const std::vector<common::Value *> &values) const {
+    size_t operator()(const std::vector<type::Value> &values) const {
       size_t seed = 0;
       for (auto v : values) {
-        v->HashCombine(seed);
+        v.HashCombine(seed);
       }
       return seed;
     }
   };
 
   struct ValueVectorCmp {
-    bool operator()(const std::vector<common::Value *> &lhs,
-                    const std::vector<common::Value *> &rhs) const {
+    bool operator()(const std::vector<type::Value> &lhs,
+                    const std::vector<type::Value> &rhs) const {
       for (size_t i = 0; i < lhs.size() && i < rhs.size(); i++) {
-        std::unique_ptr<common::Value> neq(lhs[i]->CompareNotEquals(*rhs[i]));
-        if (neq->IsTrue())
-          return false;
+        if (lhs[i].CompareNotEquals(rhs[i]) == type::CMP_TRUE) return false;
       }
-      if (lhs.size() == rhs.size())
-        return true;
+      if (lhs.size() == rhs.size()) return true;
       return false;
     }
   };
 
   // Default equal_to should works well
-  typedef std::unordered_map<std::vector<common::Value *>, AggregateList *,
-                             ValueVectorHasher, ValueVectorCmp> HashAggregateMapType;
+  typedef std::unordered_map<std::vector<type::Value>, AggregateList *,
+                             ValueVectorHasher, ValueVectorCmp>
+      HashAggregateMapType;
 
   /** @brief Group by key values used */
-  std::vector<common::Value *> group_by_key_values;
+  std::vector<type::Value> group_by_key_values;
 
   /** @brief Hash table */
   HashAggregateMapType aggregates_map;
@@ -347,7 +329,7 @@ class HashAggregator : public AbstractAggregator {
 class SortedAggregator : public AbstractAggregator {
  public:
   SortedAggregator(const planner::AggregatePlan *node,
-                   storage::DataTable *output_table,
+                   storage::AbstractTable *output_table,
                    executor::ExecutorContext *econtext,
                    size_t num_input_columns);
 
@@ -359,10 +341,10 @@ class SortedAggregator : public AbstractAggregator {
 
  private:
   //  AbstractTuple *prev_tuple = nullptr;
-  std::vector<common::Value *> delegate_tuple_values_;
-  const expression::ContainerTuple<std::vector<common::Value *>> delegate_tuple_;
+  std::vector<type::Value> delegate_tuple_values_;
+  const ContainerTuple<std::vector<type::Value>> delegate_tuple_;
   const size_t num_input_columns_;
-  Agg **aggregates;
+  AbstractAttributeAggregator **aggregates;
 };
 
 /**
@@ -371,7 +353,7 @@ class SortedAggregator : public AbstractAggregator {
 class PlainAggregator : public AbstractAggregator {
  public:
   PlainAggregator(const planner::AggregatePlan *node,
-                  storage::DataTable *output_table,
+                  storage::AbstractTable *output_table,
                   executor::ExecutorContext *econtext);
 
   bool Advance(AbstractTuple *next_tuple) override;
@@ -381,7 +363,7 @@ class PlainAggregator : public AbstractAggregator {
   ~PlainAggregator();
 
  private:
-  Agg **aggregates;
+  AbstractAttributeAggregator **aggregates;
 };
 }
 // namespace executor

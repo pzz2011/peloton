@@ -10,12 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 #pragma once
 
 #include "optimizer/column.h"
 #include "storage/tile_group.h"
-#include "optimizer/util.h"
 
 #include <vector>
 
@@ -35,5 +33,5 @@ class TupleSample {
   storage::TileGroup *sampled_tuples;
 };
 
-} /* namespace optimizer */
-} /* namespace peloton */
+} // namespace optimizer
+} // namespace peloton
